@@ -1,19 +1,9 @@
 (ns amclj.ros
-  (:require [clojure.reflect :as reflect]
-            [clojure.pprint :as pp]
-            [clojure.string :as str])
+  (:require [clojure.string :as str])
   (:import org.ros.concurrent.CancellableLoop
            org.ros.namespace.GraphName
            [org.ros.node AbstractNodeMain ConnectedNode NodeMain NodeConfiguration DefaultNodeMainExecutor]
            [org.ros.node.topic Publisher Subscriber]))
-
-(defn string-msg
-  ([] (string-msg nil))
-  ([msg]
-     (let [data (atom msg)]
-       (proxy [std_msgs.String] []
-         (getData [] @data)
-         (setData [newdata] (reset! data newdata))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Node creation
@@ -32,7 +22,10 @@
   [node]
   @(:connection node))
 
-(defn rosnode [name]
+(defn rosnode
+  "Create a ROS node of the given name. It is created but not yet
+  connected and has no publishers or subscribers."
+  [name]
   (let [conn (atom nil)
         conf (NodeConfiguration/newPrivate)
         exec (DefaultNodeMainExecutor/newDefault)
@@ -50,12 +43,12 @@
           nodemain (:nodemain node)
           configuration (:configuration node)]
       (. executor execute  nodemain configuration)
-      node))
+      (assoc node :running true)))
   (stop [node]
     (let [executor (:executor node)
           nodemain (:nodemain node)]
       (. executor shutdownNodeMain nodemain))
-    node)
+    (reset! (:connection node) nil))
   (running? [node] (-> node :connection deref nil? not)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -90,7 +83,7 @@
 ;;                              (map val data))]
 ;;            (list m v))))
 
-(defn new-message* [node topic]
+(defn- new-message* [node topic]
   (if-let [publisher (get-in node [:publishers topic])]
     (.newMessage publisher)
     (throw (IllegalArgumentException. (str "No publisher for " topic)))))
@@ -100,7 +93,6 @@
     (.publish publisher msg)
     (throw (IllegalArgumentException. (str "No publisher for " topic)))))
 
-
 (extend-type RosNode
   IPublish
   (publish [node topic msg] (publish* node topic msg))
@@ -109,4 +101,27 @@
 
 
 (defprotocol ISubscribe
-  (subscribe [_ topic type callback-fn]))
+  (subscribe [node topic type callback-fn]
+    "Subcribe to the given topic of type with a callback-fn. The
+     callback-fn must be of one parameter."))
+
+(defn- msg-listener [f]
+  (proxy [org.ros.message.MessageListener] []
+    (onNewMessage [msg]
+      (f msg))))
+
+(defn- subscribe* [node topic type callback-fn]
+  (let [subscriber (or (get-in node [:subscribers topic])
+                       (.newSubscriber (connection node) topic type))
+        msg-fn (msg-listener callback-fn)
+        ;; msg-fn (proxy subscriber [org.ros.message.MessageListener] []
+        ;;               (onNewMessage [msg]
+        ;;                 (callback-fn msg)))
+        ]
+    (.addMessageListener subscriber msg-fn)
+    (update-in node [:subscribers] assoc topic subscriber)))
+
+(extend-type RosNode
+  ISubscribe
+  (subscribe [node topic type callback-fn]
+    (subscribe* node topic type callback-fn)))
