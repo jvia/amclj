@@ -17,6 +17,11 @@
     [name connection configuration
      executor nodemain publishers subscribers])
 
+(defn rostype
+  "Return the ROS type description from a message class."
+  [rosmsg]
+  (-> rosmsg str (str/replace "." "/") (str/replace "interface " "")))
+
 (defn- connection
   "Get the connection of a node"
   [node]
@@ -60,6 +65,20 @@
   (add-publisher [node topic type] "Add a new publisher.")
   (new-message [node topic] "Creates a new message to publish on the given topic"))
 
+(defn- restr
+  "Perform a string version of rest"
+  [string]
+  (apply str (rest string)))
+
+(defn- javaize [name]
+  (let [m (-> name str restr)]
+    (str ".set" (str/capitalize m))))
+
+(defmacro rosmsg [publisher data]
+  `(#(doto (.newMessage %)
+       ~@(for [[m v] (zipmap (map (comp symbol javaize key) data)
+                             (map val data))]
+           (list m v))) ~publisher))
 
 (defn- add-publisher* [node topic typestr]
   (when-not (running? node)
@@ -67,21 +86,6 @@
   (let [connection (connection node)
         publisher (.newPublisher connection topic typestr)]
     (update-in node [:publishers] assoc topic publisher)))
-
-;; (defn- restr
-;;   "Perform a string version of rest"
-;;   [string]
-;;   (apply str (rest string)))
-
-;; (defn- javaize [name]
-;;   (let [m (-> name str restr)]
-;;     (str ".set" (str/capitalize m))))
-
-;; (defmacro rosmsg [publisher data]
-;;     `(doto (.newMessage ~publisher)
-;;        ~@(for [[m v] (zipmap (map (comp symbol javaize key) data)
-;;                              (map val data))]
-;;            (list m v))))
 
 (defn- new-message* [node topic]
   (if-let [publisher (get-in node [:publishers topic])]
@@ -96,7 +100,7 @@
 (extend-type RosNode
   IPublish
   (publish [node topic msg] (publish* node topic msg))
-  (add-publisher [node topic type] (add-publisher* node topic type))
+  (add-publisher [node topic type] (add-publisher* node topic (rostype type)))
   (new-message [node topic] (new-message* node topic)))
 
 
@@ -124,4 +128,6 @@
 (extend-type RosNode
   ISubscribe
   (subscribe [node topic type callback-fn]
-    (subscribe* node topic type callback-fn)))
+    (subscribe* node topic (rostype type) callback-fn)))
+
+
