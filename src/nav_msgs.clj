@@ -1,0 +1,42 @@
+(ns nav-msgs
+  (:require [rosclj.msg :refer :all]
+            [incanter.core :refer [matrix identity-matrix]]))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; MapMetaData
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord MapMetaData [map-load-time resolution width height pose])
+
+(defmethod from-ros "nav_msgs/MapMetaData" [map-meta]
+  (-> (bean-clean map-meta)
+      (update-in [:mapLoadTime] from-ros)
+      (update-in [:origin] from-ros)))
+
+(defn map-meta-data [& {:keys [map-load-time resolution width height pose]
+                        :or {time (std-msgs/time) pose (geometry-msgs/pose)
+                             resolution 0 widht 0 height 0}}]
+  (->MapMetaData map-load-time resolution width height pose))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OccupancyGrid
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord OccupancyGrid [header info data])
+
+(defmethod from-ros "nav_msgs/OccupancyGrid" [map]
+  (let [rows (.getHeight (.getInfo map))
+        cols (.getWidth (.getInfo map))]
+    (-> (bean-clean map)
+        (update-in [:header] from-ros)
+        (update-in [:info] from-ros)
+        (update-in [:data] #(let [raw-data % #_(.getData %)
+                                  size (.readableBytes raw-data)
+                                  array (byte-array size)
+                                  _ (.readBytes raw-data array)]
+                              (matrix (vec array) cols))))))
+
+(defn occupancy-grid [& {:keys [header info data]
+                         :or {header (std-msgs/header)
+                              info (map-meta-data)
+                              data nil}}]
+  (->OccupancyGrid header info data))
