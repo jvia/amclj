@@ -1,5 +1,6 @@
 (ns geometry-msgs
-  (:require [rosclj.msg :refer :all]
+  (:require [std-msgs]
+            [rosclj.msg :refer :all]
             [incanter.core :refer [matrix identity-matrix]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -22,7 +23,7 @@
   (bean-clean quat))
 
 (defn quaternion [& {:keys [x y z w]
-                     :or [x 0 y 0 z 0 w 0]}]
+                     :or {x 0 y 0 z 0 w 1}}]
   (->Quaternion x y z w))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -35,9 +36,9 @@
       (update-in [:position] from-ros)
       (update-in [:orientation] from-ros)))
 
-(defn pose [& {:keys [pose orientation]
-               :or {pose (point) orientation (quaternion)}}]
-  (->Pose pose orientation))
+(defn pose [& {:keys [position orientation]
+               :or {position (point) orientation (quaternion)}}]
+  (->Pose position orientation))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; PoseStamped
@@ -90,8 +91,8 @@
       (update-in [:pose] from-ros)))
 
 (defn pose-with-covariance-stamped [& {:keys [header pose-cov]
-                               :or {header (std-msgs/header)
-                                    pose-cov (pose-with-covariance)}}]
+                                       :or {header (std-msgs/header)
+                                            pose-cov (pose-with-covariance)}}]
   (->PoseWithCovariance header pose-cov))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -134,3 +135,44 @@
                                  child-frame-id ""
                                  transform (transform)}}]
   (->TransformStamped header child-frame-id transform))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; PoseArray
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord PoseArray [header poses])
+
+(defmethod from-ros "geometry_msgs/PoseArray" [posearr]
+  (-> (bean-clean posearr)
+      (update-in [:header] from-ros)
+      (update-in [:poses] #(map from-ros (vec %)))))
+
+(defn pose-array [& {:keys [header poses] :or {header (std-msgs/header) poses []}}]
+  (->PoseArray header poses))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Twist
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord Twist [linear angular])
+
+(defmethod from-ros "geometry_msgs/Twist" [twist]
+  (-> (bean-clean twist)
+      (update-in [:linear] from-ros)
+      (update-in [:angular] from-ros)))
+
+(defn twist [& {:keys [linear angular] :or {linear (vector3) angular (vector3)}}]
+  (->Twist linear angular))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TwistWithCovariance
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord TwistWithCovariance [twist covariance])
+
+(defmethod from-ros "geometry_msgs/TwistWithCovariance" [twist]
+  (-> (bean-clean twist)
+      (update-in [:twist] from-ros)
+      (update-in [:covariance] #(-> % vec (matrix 6)))))
+
+(defn twist-with-covariance [& {:keys [twist covariance]
+                               :or {twist (twist) covariance (identity-matrix 6)}}]
+  (->TwistWithCovariance twist covariance))

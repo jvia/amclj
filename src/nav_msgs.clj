@@ -40,3 +40,20 @@
                               info (map-meta-data)
                               data nil}}]
   (->OccupancyGrid header info data))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Odometry
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defrecord Odometry [header child-frame-id pose twist])
+
+(defmethod from-ros "nav_msgs/Odometry" [odom]
+  (-> (bean-clean odom)
+      (update-in [:header] from-ros)
+      (update-in [:pose] from-ros)
+      (update-in [:twist] from-ros)))
+
+(defn odometry [& {:keys [header child-frame-id pose twist]
+                   :or {header (std-msgs/header) child-frame-id ""
+                        pose (geometry-msgs/pose-with-covariance)
+                        twist (geometry-msgs/twist-with-covariance)}}]
+  (->Odometry header child-frame-id pose twist))

@@ -9,8 +9,8 @@
   <!-- Run the map server -->
   <node name="map_server" pkg="map_server" type="map_server" args="$(find amclj)/launch/lgfloor.pgm 0.050000"/>
 
-  <!-- transform laser co-ordinates into robot-base co-ordinate frame -->
-  <!-- <node pkg="tf" type="static_transform_publisher" name="stp_laser" output="screen" args="0.135 0 0.202 0 0 0 base_link laser 100" /> -->
+  transform laser co-ordinates into robot-base co-ordinate frame
+  <node pkg="tf" type="static_transform_publisher" name="stp_laser" output="screen" args="0.135 0 0.202 0 0 0 base_link laser 100" />
 
   <!-- p2os_urdf launch -->
   <!-- <include file="$(find p2os_urdf)/launch/pioneer3dx_urdf.launch"/> -->
