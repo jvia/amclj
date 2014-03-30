@@ -1,11 +1,16 @@
 (ns amclj.core
-  (:require [amclj.ros :refer :all]
+  (:require ;;[sensor-msgs]
+            ;;[tf2-msgs]
+            ;;[std-msgs]
+            [amclj.ros :refer :all]
             [amclj.pf :refer [uniform-initialization calculate-control mcl pose-estimate]]
             [rosclj.msg :refer [from-ros to-ros]]
             [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer]]
             [clojure.core.async :as async]
             [clojure.reflect :as reflect]
-            [gavagai.core :as g]))
+            [taoensso.timbre :as timbre]))
+
+(timbre/refer-timbre)
 
 
 (defn sleepy-identity
@@ -64,7 +69,7 @@
                 current-time (-> laser-scan :header :stamp)
                 tf' (update-tf pose tf current-time)]
             (publish amcl "/particlecloud" (to-ros (new-message amcl "/particlecloud") particles'))
-            (publish amcl "/amcl_pose" (to-ros (new-message amcl "/amcl_pose")  pose))
+            (publish amcl "/amcl_pose" (to-ros pose))
             (publish amcl "/tf" (to-ros (new-message amcl "/tf")  tf'))
             (recur particles' (<! scan) curr-tf (<! tf))))))))
 
@@ -96,9 +101,9 @@
 
   (def simple-node (-> (rosnode "basic")
                        start sleepy-identity
-                       (subscribe "/chatter" std_msgs.String  #(println (from-ros %)))
+                       (subscribe "/chatter" std_msgs.String  #(println %))
                        (add-publisher "/chatter" std_msgs.String)
-                       (subscribe "/pose" geometry_msgs.Pose #(println (from-ros %)))
+                       (subscribe "/pose" geometry_msgs.Pose #(println %))
                        (add-publisher "/pose" geometry_msgs.Pose)))
 
 

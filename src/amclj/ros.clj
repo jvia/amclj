@@ -1,5 +1,6 @@
 (ns amclj.ros
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [rosclj.msg :refer [to-ros from-ros]])
   (:import org.ros.concurrent.CancellableLoop
            org.ros.namespace.GraphName
            [org.ros.node AbstractNodeMain ConnectedNode NodeMain NodeConfiguration DefaultNodeMainExecutor]
@@ -18,7 +19,7 @@
      executor nodemain publishers subscribers])
 
 (defn rostype
-  "Return the ROS type description from a message class."
+  "Return the ROS message type from a message class."
   [rosmsg]
   (-> rosmsg str (str/replace "." "/") (str/replace "interface " "")))
 
@@ -94,7 +95,7 @@
 
 (defn- publish* [node topic msg]
   (if-let [publisher (get-in node [:publishers topic])]
-    (.publish publisher msg)
+    (.publish publisher (to-ros msg))
     (throw (IllegalArgumentException. (str "No publisher for " topic)))))
 
 (extend-type RosNode

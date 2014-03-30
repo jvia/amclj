@@ -11,5 +11,6 @@
                  [ros.rosjava_core/rosjava_bootstrap "0.0.0-SNAPSHOT"]
                  [ros.rosjava_core/rosjava "0.0.0-SNAPSHOT"]
                  [ros.rosjava_core/rosjava_messages "0.0.0-SNAPSHOT"]
-                 [midje "1.6.2"]]
+                 [midje "1.6.2"]
+                 [com.taoensso/timbre "3.1.6"]]
   :repositories [["rosjava" "https://github.com/rosjava/rosjava_mvn_repo/raw/master"]])
