@@ -9,9 +9,10 @@
 (defrecord MapMetaData [map-load-time resolution width height pose])
 
 (defmethod from-ros "nav_msgs/MapMetaData" [map-meta]
-  (-> (bean-clean map-meta)
-      (update-in [:mapLoadTime] from-ros)
-      (update-in [:origin] from-ros)))
+  (map->MapMetaData
+   (-> (bean-clean map-meta)
+       (update-in [:mapLoadTime] from-ros)
+       (update-in [:origin] from-ros))))
 
 (defn map-meta-data [& {:keys [map-load-time resolution width height pose]
                         :or {time (std-msgs/time) pose (geometry-msgs/pose)
@@ -26,14 +27,15 @@
 (defmethod from-ros "nav_msgs/OccupancyGrid" [map]
   (let [rows (.getHeight (.getInfo map))
         cols (.getWidth (.getInfo map))]
-    (-> (bean-clean map)
-        (update-in [:header] from-ros)
-        (update-in [:info] from-ros)
-        (update-in [:data] #(let [raw-data % #_(.getData %)
-                                  size (.readableBytes raw-data)
-                                  array (byte-array size)
-                                  _ (.readBytes raw-data array)]
-                              (matrix (vec array) cols))))))
+    (map->OccupancyGrid
+     (-> (bean-clean map)
+         (update-in [:header] from-ros)
+         (update-in [:info] from-ros)
+         (update-in [:data] #(let [raw-data % #_(.getData %)
+                                   size (.readableBytes raw-data)
+                                   array (byte-array size)
+                                   _ (.readBytes raw-data array)]
+                               (matrix (vec array) cols)))))))
 
 (defn occupancy-grid [& {:keys [header info data]
                          :or {header (std-msgs/header)
@@ -47,13 +49,16 @@
 (defrecord Odometry [header child-frame-id pose twist])
 
 (defmethod from-ros "nav_msgs/Odometry" [odom]
-  (-> (bean-clean odom)
-      (update-in [:header] from-ros)
-      (update-in [:pose] from-ros)
-      (update-in [:twist] from-ros)))
+  (map->Odometry
+   (-> (bean-clean odom)
+       (update-in [:header] from-ros)
+       (update-in [:pose] from-ros)
+       (update-in [:twist] from-ros))))
 
 (defn odometry [& {:keys [header child-frame-id pose twist]
                    :or {header (std-msgs/header) child-frame-id ""
                         pose (geometry-msgs/pose-with-covariance)
                         twist (geometry-msgs/twist-with-covariance)}}]
   (->Odometry header child-frame-id pose twist))
+
+

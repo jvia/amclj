@@ -9,7 +9,7 @@
 (defrecord Point [x y z])
 
 (defmethod from-ros "geometry_msgs/Point" [pt]
-  (bean-clean pt))
+  (map->Point (bean-clean pt)))
 
 (with-msg-factory [factory "geometry_msgs/Point"
                    (str "float64 x\n"
@@ -30,7 +30,7 @@
 (defrecord Quaternion [x y z w])
 
 (defmethod from-ros "geometry_msgs/Quaternion" [quat]
-  (bean-clean quat))
+  (map->Quaternion (bean-clean quat)))
 
 (with-msg-factory [factory "geometry_msgs/Quaternion"
                    (str "float64 x\n"
@@ -54,9 +54,9 @@
 (defrecord Pose [position orientation])
 
 (defmethod from-ros "geometry_msgs/Pose" [pose]
-  (-> (bean-clean pose)
-      (update-in [:position] from-ros)
-      (update-in [:orientation] from-ros)))
+  (map->Pose (-> (bean-clean pose)
+                 (update-in [:position] from-ros)
+                 (update-in [:orientation] from-ros))))
 
 
 (with-msg-factory [f "geometry_msgs/Pose"
@@ -77,9 +77,9 @@
 (defrecord PoseStamped [header pose])
 
 (defmethod from-ros "geometry_msgs/PoseStamped" [pose]
-  (-> (bean-clean pose)
-      (update-in [:header] from-ros)
-      (update-in [:pose] from-ros)))
+  (map->PoseStamped (-> (bean-clean pose)
+                        (update-in [:header] from-ros)
+                        (update-in [:pose] from-ros))))
 
 (with-msg-factory [f "geometry_msgs/PoseStamped" "Header header\nPose pose\n"]
   (defmethod to-ros :geometry_msgs.PoseStamped [pose]
@@ -97,7 +97,7 @@
 (defrecord Pose2D [x y theta])
 
 (defmethod from-ros "geometry_msgs/Pose2D" [pose]
-  (bean-clean pose))
+  (map->Pose2D (bean-clean pose)))
 
 (defn pose2d [& {:keys [x y theta] :or {x 0 y 0 theta 0}}]
   (->Pose2D x y theta))
@@ -109,9 +109,10 @@
 (defrecord PoseWithCovariance [pose covariance])
 
 (defmethod from-ros "geometry_msgs/PoseWithCovariance" [pose]
-  (-> (bean-clean pose)
-      (update-in [:pose] from-ros)
-      (update-in [:covariance] #(-> % vec (matrix 6)))))
+  (map->PoseWithCovariance
+   (-> (bean-clean pose)
+       (update-in [:pose] from-ros)
+       (update-in [:covariance] #(-> % vec (matrix 6))))))
 
 (with-msg-factory [f "geometry_msgs/PoseWithCovariance"
                    (str "Pose pose\n"
@@ -132,9 +133,10 @@
 (defrecord PoseWithCovarianceStamped [header pose])
 
 (defmethod from-ros "geometry_msgs/PoseWithCovarianceStamped" [pose]
-  (-> (bean-clean pose)
-      (update-in [:header] from-ros)
-      (update-in [:pose] from-ros)))
+  (map->PoseWithCovarianceStamped
+   (-> (bean-clean pose)
+       (update-in [:header] from-ros)
+       (update-in [:pose] from-ros))))
 
 (with-msg-factory [f "geometry_msgs/PoseWithCovarianceStamped"
                    (str "Header header\n"
@@ -155,7 +157,7 @@
 (defrecord Vector3 [x y z])
 
 (defmethod from-ros "geometry_msgs/Vector3" [vec3]
-  (bean-clean vec3))
+  (map->Vector3 (bean-clean vec3)))
 
 (with-msg-factory [f "geometry_msgs/Vector3"
                    "float64 x\nfloat64 y\nfloat64 z"]
@@ -174,9 +176,9 @@
 (defrecord Transform [translation rotation])
 
 (defmethod from-ros "geometry_msgs/Transform" [transform]
-  (-> (bean-clean transform)
-      (update-in [:translation] from-ros)
-      (update-in [:rotation] from-ros)))
+  (map->Transform (-> (bean-clean transform)
+                      (update-in [:translation] from-ros)
+                      (update-in [:rotation] from-ros))))
 
 (with-msg-factory [f "geometry_msgs/Transform"
                    "Vector3 translation\nQuaternion rotation"]
@@ -195,9 +197,10 @@
 (defrecord TransformStamped [header child-frame-id transform])
 
 (defmethod from-ros "geometry_msgs/TransformStamped" [transform]
-  (-> (bean-clean transform)
-      (update-in [:header] from-ros)
-      (update-in [:transform] from-ros)))
+  (map->TransformStamped
+   (-> (bean-clean transform)
+       (update-in [:header] from-ros)
+       (update-in [:transform] from-ros))))
 
 (with-msg-factory [f "geometry_msgs/TransformStamped"
                    (str "Header header\n"
@@ -221,9 +224,10 @@
 (defrecord PoseArray [header poses])
 
 (defmethod from-ros "geometry_msgs/PoseArray" [posearr]
-  (-> (bean-clean posearr)
-      (update-in [:header] from-ros)
-      (update-in [:poses] #(map from-ros (vec %)))))
+  (map->PoseArray
+   (-> (bean-clean posearr)
+       (update-in [:header] from-ros)
+       (update-in [:poses] #(map from-ros (vec %))))))
 
 
 (with-msg-factory [f "geometry_msgs/PoseArray"
@@ -243,9 +247,10 @@
 (defrecord Twist [linear angular])
 
 (defmethod from-ros "geometry_msgs/Twist" [twist]
-  (-> (bean-clean twist)
-      (update-in [:linear] from-ros)
-      (update-in [:angular] from-ros)))
+  (map->Twist
+   (-> (bean-clean twist)
+       (update-in [:linear] from-ros)
+       (update-in [:angular] from-ros))))
 
 (with-msg-factory [f "geometry_msgs/Twist"
                    (str "Vector3  linear\n"
@@ -265,9 +270,10 @@
 (defrecord TwistWithCovariance [twist covariance])
 
 (defmethod from-ros "geometry_msgs/TwistWithCovariance" [twist]
-  (-> (bean-clean twist)
-      (update-in [:twist] from-ros)
-      (update-in [:covariance] #(-> % vec (matrix 6)))))
+  (map->TwistWithCovariance
+   (-> (bean-clean twist)
+       (update-in [:twist] from-ros)
+       (update-in [:covariance] #(-> % vec (matrix 6))))))
 
 (with-msg-factory [f "geometry_msgs/TwistWithCovariance"
                    (str "Twist twist\n"

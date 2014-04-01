@@ -6,8 +6,9 @@
 (defrecord TFMessage [transforms])
 
 (defmethod from-ros "tf2_msgs/TFMessage" [tf]
-  (-> (bean-clean tf)
-      (update-in [:transforms] #(pmap from-ros %))))
+  (map->TFMessage
+   (-> (bean-clean tf)
+       (update-in [:transforms] #(pmap from-ros %)))))
 
 (with-msg-factory [factory
                    "tf2_msgs/TFMessage"
@@ -15,8 +16,9 @@
   (defmethod to-ros :tf2_msgs.TFMessage [tf2]
     (let [transforms (map to-ros (:transforms tf2))]
       (doto (.newFromType factory "tf2_msgs/TFMessage")
-        (.setTransformations (make-array ))))))
+        
+        (.setTransforms (map to-ros (:transforms tf2)))))))
 
-(defn tf [& {:keys [transforms] :or {transforms '()}}]
+(defn tf [& {:keys [transforms] :or {transforms []}}]
   (->TFMessage transforms))
 

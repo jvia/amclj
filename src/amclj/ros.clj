@@ -5,7 +5,7 @@
            org.ros.namespace.GraphName
            [org.ros.node AbstractNodeMain ConnectedNode NodeMain NodeConfiguration DefaultNodeMainExecutor]
            [org.ros.node.topic Publisher Subscriber]))
-
+#_(methods from-ros)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Node creation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -113,7 +113,7 @@
 (defn- msg-listener [f]
   (proxy [org.ros.message.MessageListener] []
     (onNewMessage [msg]
-      (f msg))))
+      (f (from-ros msg)))))
 
 (defn- subscribe* [node topic type callback-fn]
   (let [subscriber (or (get-in node [:subscribers topic])
@@ -132,3 +132,11 @@
     (subscribe* node topic (rostype type) callback-fn)))
 
 
+(defn ready? [node]
+  (not (nil? @(:connection node))))
+
+(defn wait-until-connected [node]
+  (loop []
+    (when-not (ready? node)
+      (Thread/sleep 100)
+      (recur))))

@@ -8,7 +8,7 @@
 (defrecord Bool [data])
 
 (defmethod from-ros "std_msgs/Bool" [bool]
-  (bean-clean bool))
+  (map->Bool (bean-clean bool)))
 
 (with-msg-factory [factory "std_msgs/Bool" "bool data"]
   (defmethod to-ros :std_msgs.Bool [bool]
@@ -24,7 +24,7 @@
 (defrecord Duration [secs nsecs])
 
 (defmethod from-ros org.ros.message.Duration [duration]
-  {:secs (.secs duration) :nsecs (.nsecs duration)})
+  (->Duration (.secs duration)(.nsecs duration)))
 
 (with-msg-factory [factory "std_msgs/Duration" "duration data"]
   (defmethod to-ros :std_msgs.Duration [duration]
@@ -40,7 +40,7 @@
 (defrecord Time [secs nsecs])
 
 (defmethod from-ros 'org.ros.message.Time [duration]
-  {:secs (.secs duration) :nsecs (.nsecs duration)})
+  (->Time (.secs duration) (.nsecs duration)))
 
 (with-msg-factory [factory "std_msgs/Time" "time data"]
   (defmethod to-ros :std_msgs.Time [time]
@@ -53,7 +53,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Header
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defrecord Header [seq stamp frame-id])
+(defrecord Header [seq stamp frameId])
 
 (defmethod from-ros "std_msgs/Header" [header]
   (map->Header
@@ -65,20 +65,19 @@
                    "# Standard metadata for higher-level stamped data types.\n# This is generally used to communicate timestamped data \n# in a particular coordinate frame.\n# \n# sequence ID: consecutively increasing ID \nuint32 seq\n#Two-integer timestamp that is expressed as:\n# * stamp.secs: seconds (stamp_secs) since epoch\n# * stamp.nsecs: nanoseconds since stamp_secs\n# time-handling sugar is provided by the client library\ntime stamp\n#Frame this data is associated with\n# 0: no frame\n# 1: global frame\nstring frame_id\n"]
   (defmethod to-ros :std_msgs.Header [header]
     (doto (.newFromType factory "std_msgs/Header")
-      (.setFrameId (:frame-id header))
+      (.setFrameId (:frameId header))
       (.setSeq (:seq header))
       (.setStamp (org.ros.message.Time. (-> header :stamp :secs)
                                         (-> header :stamp :nsecs))))))
 
-(defn header [& {:keys [seq stamp frame-id] :or {seq 0 stamp (time) frame-id ""}}]
-  (->Header seq stamp frame-id))
+(defn header [& {:keys [seq stamp frameId] :or {seq 0 stamp (time) frameId ""}}]
+  (->Header seq stamp frameId))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; String
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmethod from-ros "std_msgs/String" [str]
   (:data (bean-clean str)))
-
 
 (with-msg-factory [factory "std_msgs/String" "string data"]
   (defmethod to-ros :java.lang.String [str]

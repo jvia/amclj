@@ -39,13 +39,18 @@
     (cond
      (isa? org.ros.message.Time class)     'org.ros.message.Time
      (isa? org.ros.message.Duration class) 'org.ros.message.Duration
-     :else(.getType (.getInstance msg)))))
+     :else (.getType (.getInstance msg)))))
 
 (defmulti from-ros from-ros-dispatch)
 
 (defmethod from-ros :default [params]
-  (throw (IllegalArgumentException.
-          (str "No dispatch for " (type params)))))
+  (try
+    (let [class-name (.getType (.getInstance (class params)))]
+      (throw (IllegalArgumentException.
+              (str "No dispatch of from-ros for " class-name))))
+    (catch Exception _
+      (throw (IllegalArgumentException.
+              (str "No dispatch of from-ros for " (type params)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; to-ros
@@ -57,8 +62,21 @@
 
 (defmethod to-ros :default [msg]
   (throw (IllegalArgumentException.
-          (str "No dispatch for " (type msg)))))
+          (str "No dispatch of to-ros for " (type msg)))))
 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Message Type Protocols
+;;
+;; These can be extended to arbitrary message types to make working
+;; with them easier.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defprotocol IMinus
+  (minus [a] [a & bs]))
 
+(defprotocol IAdd
+  (add [a b] [a b & cs]))
+
+(defprotocol INoise
+  (gaussian-noise [this mean sd]))
