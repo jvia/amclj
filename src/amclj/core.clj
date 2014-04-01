@@ -40,7 +40,7 @@
           (subscribe "/initialpose" geometry_msgs.PoseWithCovarianceStamped #(do (debug "Received pose") (reset! *pose* %)))
           (subscribe "/map" nav_msgs.OccupancyGrid #(do (debug "Received map") (reset! *map* %)))
           ;; Publications
-          (add-publisher "/amcl_pose" geometry_msgs.PoseWithCovarianceStamped)
+          (add-publisher "/pose2" geometry_msgs.PoseStamped)
           (add-publisher "/particlecloud" geometry_msgs.PoseArray)
           (add-publisher "/tf" tf2_msgs.TFMessage))
       (catch Exception e
@@ -115,19 +115,4 @@
   )
 
 
-(defn gaussian-noise [pose mean sd]
-  (let [x  (-> pose :position :x)
-        y  (-> pose :position :y)
-        z  (-> pose :position :z)
-        rx (-> pose :orientation :x)
-        ry (-> pose :orientation :y)
-        rz (-> pose :orientation :z)
-        rw (-> pose :orientation :w)]
-    (geometry-msgs/pose
-       :position (geometry-msgs/point :x (+ x (stats/sample-normal 1 :mean mean :sd sd))
-                                  :y (+ y (stats/sample-normal 1 :mean mean :sd sd))
-                                  :z (+ z (stats/sample-normal 1 :mean mean :sd sd)))
-       :orientation (geometry-msgs/quaternion  :x rx #_(+ rx (stats/sample-normal 1 :mean mean :sd sd))
-                                               :y ry #_(+ ry (stats/sample-normal 1 :mean mean :sd sd))
-                                               :z rz #_(+ rz (stats/sample-normal 1 :mean mean :sd sd))
-                                               :w rw #_(+ rw (stats/sample-normal 1 :mean mean :sd sd))))))
+

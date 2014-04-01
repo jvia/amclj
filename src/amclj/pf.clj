@@ -4,12 +4,60 @@
             [incanter.core :refer :all]
             [incanter.stats :as stats]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OccupancyGrid
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn inhabitable?
   "Can a robot occupy the given location in the map?"
   [map pose]
   (let [x (int (-> pose :position :x))
         y (int (-> pose :position :y))]
     (zero? (sel (-> map :data) x y))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Quaternions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn mult-quaternion [qa qb]
+  (let [qaw (:w qa) qax (:x qa) qay (:y qa) qaz (:z qa)
+        qbw (:w qb) qbx (:x qb) qby (:y qb) qbz (:z qb)]
+    (geometry-msgs/quaternion
+     :x (+ (* qax qbw) (* qaw qbx) (* qay qbz) (- (* qaz qby)))
+     :y (+ (* qaw qby) (- (* qax qbz)) (* qay qbw) (* qaz qbx)) 
+     :z (+ (* qaw qbz) (* qax qby) (- (* qay qbx)) (* qaz qbw))
+     :w (- (* qaw qbw) (* qax qbx) (* qay qby) (* qaz qbz)))))
+
+
+(defn rotate-quaternion [quat heading]
+  (let [c1 (Math/cos (/ heading 2))
+        s1 (Math/sin (/ heading 2))
+        c2 1.0, s2 0.0, c3 1.0 s3 1.0
+        c1c2 (* c1 c2)
+        s1s2 (* s1 s2)]
+    (mult-quaternion
+     (geometry-msgs/quaternion :w (- (* c1c2 c3) (* s1s2 s3))
+                               :x (+ (* c1c2 s3) (* s1s2 c3))
+                               :y (- (* c1 s2 c3) (* s1 c2 s3))
+                               :z (+ (* s1 c2 c3) (* c1 s2 s3)))
+     quat)))
+
+(defn heading->quat [heading]
+  (let [initial (geometry-msgs/quaternion)]
+    (rotate-quaternion initial heading)))
+
+(defn quat->heading [quat]
+  (let [qx (-> quat :x)
+        qy (-> quat :y)
+        qz (-> quat :z)
+        qw (-> quat :w)
+        test (+ (* qx qy) (* qz qw))]
+    (cond
+     ;; singularity as north pole
+     (> test 0.49999) (* 2  (Math/atan2 qx qw))
+     ;; singularity at south pole
+     (< test -0.4999) (* -2 (Math/atan2 qx qw))
+     :else (Math/atan2 (- (* 2 qz qw) (* 2 qx qy))
+                       (- 1 (* 2 qz qz) (* 2 qy qy))))))
+
 
 
 
@@ -65,6 +113,7 @@
 
 (defn pose-estimate [particles]
   (let [raw-estimate (apply add-pose particles)
+        raw-heading (reduce + (map (comp quat->heading :orientation) particles))
         normalizer (count particles)]
     (geometry-msgs/pose
      :position
@@ -72,7 +121,9 @@
                           :y (/ (get-in raw-estimate [:position :y]) normalizer)
                           :y (/ (get-in raw-estimate [:position :y]) normalizer))
      :orientation
-     (geometry-msgs/quaternion :x (/ (get-in raw-estimate [:orientation :x]) normalizer)
+     (heading->quat (/ raw-heading normalizer))
+     #_(geometry-msgs/quaternion 
+                               :x (/ (get-in raw-estimate [:orientation :x]) normalizer)
                                :y (/ (get-in raw-estimate [:orientation :y]) normalizer)
                                :z (/ (get-in raw-estimate [:orientation :z]) normalizer)
                                :w (/ (get-in raw-estimate [:orientation :w]) normalizer)))))
@@ -106,46 +157,22 @@
 
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Quaternions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn mult-quaternion [qa qb]
-  (let [qaw (:w qa) qax (:x qa) qay (:y qa) qaz (:z qa)
-        qbw (:w qb) qbx (:x qb) qby (:y qb) qbz (:z qb)]
-    (geometry-msgs/quaternion
-     :x (+ (* qax qbw) (* qaw qbx) (* qay qbz) (- (* qaz qby)))
-     :y (+ (* qaw qby) (- (* qax qbz)) (* qay qbw) (* qaz qbx)) 
-     :z (+ (* qaw qbz) (* qax qby) (- (* qay qbx)) (* qaz qbw))
-     :w (- (* qaw qbw) (* qax qbx) (* qay qby) (* qaz qbz)))))
-
-
-(defn rotate-quaternion [quat heading]
-  (let [c1 (Math/cos (/ heading 2))
-        s1 (Math/sin (/ heading 2))
-        c2 1.0, s2 0.0, c3 1.0 s3 1.0
-        c1c2 (* c1 c2)
-        s1s2 (* s1 s2)]
-    (mult-quaternion
-     (geometry-msgs/quaternion :w (- (* c1c2 c3) (* s1s2 s3))
-                               :x (+ (* c1c2 s3) (* s1s2 c3))
-                               :y (- (* c1 s2 c3) (* s1 c2 s3))
-                               :z (+ (* s1 c2 c3) (* c1 s2 s3)))
-     quat)))
-
-(defn heading->quat [heading]
-  (let [initial (geometry-msgs/quaternion)]
-    (rotate-quaternion initial heading)))
-
-(defn quat->heading [quat]
-  (let [qx (-> quat :x)
-        qy (-> quat :y)
-        qz (-> quat :z)
-        qw (-> quat :w)
-        test (+ (* qx qy) (* qz qw))]
-    (cond
-     ;; singularity as north pole
-     (> test 0.49999) (* 2  (Math/atan2 qx qw))
-     ;; singularity at south pole
-     (< test -0.4999) (* -2 (Math/atan2 qx qw))
-     :else (Math/atan2 (- (* 2 qz qw) (* 2 qx qy))
-                       (- 1 (* 2 qz qz) (* 2 qy qy))))))
+(defn gaussian-noise
+  "Apply noise to a geometry_msgs.Pose object. Noises should be
+  two-element vectors of [mean sd]."
+  [pose trans-noise rotation-noise]
+  (assert (and (vector? trans-noise) (vector? rotation-noise)) "Noises must be vectors of [mean sd]")
+  (let [x  (-> pose :position :x)
+        y  (-> pose :position :y)
+        z  (-> pose :position :z)
+        rx (-> pose :orientation :x)
+        ry (-> pose :orientation :y)
+        rz (-> pose :orientation :z)
+        rw (-> pose :orientation :w)
+        [trans-mean trans-sd] trans-noise
+        [rot-mean rot-sd] rotation-noise]
+    (geometry-msgs/pose
+       :position (geometry-msgs/point :x (+ x (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
+                                  :y (+ y (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
+                                  :z (+ z (stats/sample-normal 1 :mean trans-mean :sd trans-sd)))
+       :orientation (rotate-quaternion (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
