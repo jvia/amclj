@@ -116,3 +116,15 @@
 
 
 
+(defn publish-silly-cloud [node]
+  (when (running? node)
+    (when-let [pose @*pose*]
+      (let [fake-cloud (geometry-msgs/pose-array
+                        :header (std-msgs/header :frameId "base_link")
+                        :poses (repeatedly 1000 #_(-> pose :pose :pose)
+                                           #(amclj.pf/gaussian-noise (-> pose :pose :pose) [0 0.5] [0 0.01])))
+            fake-pose (geometry-msgs/pose-stamped
+                       :header (std-msgs/header :frameId "base_link")
+                       :pose (pose-estimate (:poses fake-cloud)))]
+        (publish node "/particlecloud" fake-cloud)
+        (publish node "/pose2" fake-pose)))))
