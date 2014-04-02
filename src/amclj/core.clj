@@ -128,3 +128,17 @@
                        :pose (pose-estimate (:poses fake-cloud)))]
         (publish node "/particlecloud" fake-cloud)
         (publish node "/pose2" fake-pose)))))
+
+
+
+(defn publish-uniform-cloud [node]
+  (when (running? node)
+    (let [uniform-cloud (geometry-msgs/pose-array
+                          :header (std-msgs/header :frameId "base_link")
+                          :poses (uniform-initialization @*map* 1000))
+          pose (geometry-msgs/pose-stamped
+                :header (std-msgs/header :frameId "base_link")
+                :pose (pose-estimate (:poses uniform-cloud)))]
+
+      (publish node "/particlecloud" uniform-cloud)
+      (publish node "/pose2" pose))))

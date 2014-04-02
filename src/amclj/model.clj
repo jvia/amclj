@@ -1,12 +1,9 @@
 (ns amclj.model)
-(def pf-model
+(def pf
   "Parameters to the MCL algorithm.
   
   Particle Filter Options:
     :min_particles (default 100) Minimum allowed number of particles.
-  
-  
-
   "
   {:min_particles 100
    :max_particle 5000
@@ -29,7 +26,7 @@
    :use_map_topic false
    :first_map_only false})
 
-(def odom-model
+(def odom
   "Odometry Options:
     :odom_model_type (default :diff) Which model to use, either :diff
                      or :omni.
@@ -71,7 +68,7 @@
    :base_frame_id "base_link"
    :global_frame_id "map"})
 
-(def laser-model
+(def laser
   {:laser_min_range -1.0
    :laser_max_range -1.0
    :laser_max_beams 30

@@ -1,23 +1,16 @@
 (ns amclj.pf
   (:require [geometry-msgs :refer :all]
             [nav-msgs :refer :all]
+            [amclj.model :as model]
             [incanter.core :refer :all]
             [incanter.stats :as stats]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; OccupancyGrid
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn inhabitable?
-  "Can a robot occupy the given location in the map?"
-  [map pose]
-  (let [x (int (-> pose :position :x))
-        y (int (-> pose :position :y))]
-    (zero? (sel (-> map :data) x y))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Quaternions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn mult-quaternion [qa qb]
+(defn mult-quaternion
+  "Multiply two quaternions together."
+  [qa qb]
   (let [qaw (:w qa) qax (:x qa) qay (:y qa) qaz (:z qa)
         qbw (:w qb) qbx (:x qb) qby (:y qb) qbz (:z qb)]
     (geometry-msgs/quaternion
@@ -27,7 +20,9 @@
      :w (- (* qaw qbw) (* qax qbx) (* qay qby) (* qaz qbz)))))
 
 
-(defn rotate-quaternion [quat heading]
+(defn rotate-quaternion
+  "Roatate a quaternion about some heading."
+  [quat heading]
   (let [pitch 0 bank 0
         c1 (Math/cos (/ heading 2))
         s1 (Math/sin (/ heading 2))
@@ -46,7 +41,9 @@
      quat)))
 
 
-(defn create-quaternion []
+(defn create-quaternion
+  "Cretate a unit quaternion."
+  []
   (let [heading 0 pitch 0 bank 0
         c1 (Math/cos (/ heading 2))
         s1 (Math/sin (/ heading 2))
@@ -62,13 +59,14 @@
      :y (+ (* s1 c2 c3) (* c1 s2 s3))
      :z (- (* c1 s2 c3) (* s1 c2 s3)))))
 
-(defn heading->quat [heading]
+(defn heading->quat
+  "Given a heading (yaw) in radians, convert it to a quaternion."
+  [heading]
   (let [initial (geometry-msgs/quaternion)]
     (rotate-quaternion initial heading)))
 
-
 (defn quat->heading
-  "Given a quaternion, return the heading (yaw)."
+  "Given a quaternion, return the heading (yaw) in radians."
   [quat]
   (let [qx (-> quat :x)
         qy (-> quat :y)
@@ -84,18 +82,83 @@
      #_(Math/atan2   (- (* 2 qy qw) (* 2 qx qz)) (- 1 (* 2 qy qy) (* 2 qz qz)))
      (Math/atan2 (- (* 2 qz qw) (* 2 qx qy)) (- 1 (* 2 qz qz) (* 2 qy qy))))))
 
-;;atan2(2*qy*qw-2*qx*qz , 1 - 2*qy2 - 2*qz2)
-;; double sqx = q1.x*q1.x;
-;; double sqy = q1.y*q1.y;
-;; double sqz = q1.z*q1.z;
-;; heading = atan2((2*q1.y*q1.w)-(2*q1.x*q1.z) , 1 - (2*sqy) - (2*sqz));
-;;     attitude = asin(2*test);
-;;     bank = atan2(2*q1.x*q1.w-2*q1.y*q1.z , 1 - 2*sqx - 2*sqz)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OccupancyGrid
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+#_(defn map-get [map x y]
+    (let [width (-> map :info :width)
+          height (-> map :info :height)
+          idx (+ x (* y width))]
+      (assert (and (>= x 0) (>= y 0) (< x width) (< y height)))
+      (sel (-> map :data) x y)))
 
 
+;; // Convert from map index to world coords
+;; #define MAP_WXGX(map, i) (map->origin_x + (((i) - map->size_x / 2) * map->scale))
+;; #define MAP_WYGY(map, j) (map->origin_y + (((j) - map->size_y / 2) * map->scale))
+
+;; // Convert from world coords to map coords
+;; #define MAP_GXWX(map, x) (floor((x - map->origin_x) / map->scale + 0.5) + map->size_x / 2)
+;; #define MAP_GYWY(map, y) (floor((y - map->origin_y) / map->scale + 0.5) + map->size_y / 2)
+
+;; // Test to see if the given map coords lie within the absolute map bounds.
+;; #define MAP_VALID(map, i, j) ((i >= 0) && (i < map->size_x) && (j >= 0) && (j < map->size_y))
+
+;; // Compute the cell index for the given map coords.
+;; #define MAP_INDEX(map, i, j) ((i) + (j) * map->size_x)
+(defn inhabitable?
+  "Can a robot occupy the given location in the map?"
+  [map pose]
+  (let [x (int (-> pose :position :x))
+        y (int (-> pose :position :y))]
+    (zero? (sel (-> map :data) x y))))
+
+(defn map->world
+  "Convert from map index into world coordinates."
+  [map pose]
+  (-> pose
+      (update-in [:position :x] #(Math/round (* % (-> map :info :resolution))))
+      (update-in [:position :y] #(Math/round (* % (-> map :info :resolution)))))
+  ;; (let [origin-x (-> map :info :origin :position :x)
+  ;;       origin-y (-> map :info :origin :position :y)
+  ;;       height  (-> map :info :height)
+  ;;       width (-> map :info :width)
+  ;;       resolution (-> map :info :resolution)
+  ;;       mx (-> pose :position :x)
+  ;;       my (-> pose :position :y)
+  ;;       x (+ origin-x (* (- mx (/ width 2)) resolution))
+  ;;       y (+ origin-y (* (- my (/ width 2)) resolution))]
+  ;;   (-> pose
+  ;;       (assoc-in [:position :x] x)
+  ;;       (assoc-in [:position :y] y)))
+  )
+
+(defn world->map
+  "Convert from world coordinates to map coorindates"
+  [map pose]
+  (-> pose
+      (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
+      (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution)))))
+  ;; #_(let [origin-x (-> map :info :origin :position :x)
+  ;;       origin-y (-> map :info :origin :position :y)
+  ;;       height  (-> map :info :height)
+  ;;       width (-> map :info :width)
+  ;;       resolution (-> map :info :resolution)
+  ;;       x (-> pose :position :x)
+  ;;       y (-> pose :position :y)
+  ;;       mx (+ (Math/floor (+ (/ (- x origin-x) resolution) 0.5))
+  ;;             (/ width 2))
+  ;;       my (+ (Math/floor (+ (/ (- y origin-y) resolution) 0.5))
+  ;;             (/ height 2))]
+  ;;   (-> pose
+  ;;       (assoc-in [:position :x] mx)
+  ;;       (assoc-in [:position :y] my)))
+  )
 
 (defn random-pose
-  "Create a pose uniformly sampled from the grid defined by a grid."
+  "Create a pose uniformly sampled from the grid defined by a map."
   ([width height] (random-pose 0 width 0 height))
   ([min-x max-x min-y max-y]
      (let [[x] (stats/sample-uniform 1 :min min-x :max max-x)
@@ -106,18 +169,25 @@
                                         (stats/sample-normal 1))))))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Particle Filter
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-(def num-particles 100)
-
-
-(defn uniform-initialization [map num-paticles]
-  (let [height (-> map :info :height)
-        width (-> map :info :width)]
+(defn uniform-initialization
+  "Uniform create particles across the map"
+  [map num-paticles]
+  (let [origin-x (-> map :info :origin :position :x)
+        origin-y (-> map :info :origin :position :y)
+        shift-x (/ (* (-> map :info :width) (-> map :info :resolution)) 2)
+        shift-y (/ (* (-> map :info :height) (-> map :info :resolution)) 2)
+        min-x (- origin-x shift-x)
+        max-x (+ origin-x shift-x)
+        min-y (- origin-y shift-y)
+        max-y (+ origin-y shift-y)]
     (loop [particles []]
       (if (= num-paticles (count particles))
-        (geometry-msgs/pose-array :poses particles)
-        (let [proposal (random-pose width height)]
+        particles
+        (let [proposal (random-pose min-x max-x min-y max-y)]
           (if (inhabitable? map proposal)
             (recur (conj particles proposal))
             (recur particles)))))))
