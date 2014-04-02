@@ -119,8 +119,8 @@
   "Convert from map index into world coordinates."
   [map pose]
   (-> pose
-      (update-in [:position :x] #(Math/round (* % (-> map :info :resolution))))
-      (update-in [:position :y] #(Math/round (* % (-> map :info :resolution)))))
+      (update-in [:position :x] #(* % (-> map :info :resolution)))
+      (update-in [:position :y] #(* % (-> map :info :resolution))))
   ;; (let [origin-x (-> map :info :origin :position :x)
   ;;       origin-y (-> map :info :origin :position :y)
   ;;       height  (-> map :info :height)
@@ -176,21 +176,32 @@
 (defn uniform-initialization
   "Uniform create particles across the map"
   [map num-paticles]
-  (let [origin-x (-> map :info :origin :position :x)
-        origin-y (-> map :info :origin :position :y)
-        shift-x (/ (* (-> map :info :width) (-> map :info :resolution)) 2)
-        shift-y (/ (* (-> map :info :height) (-> map :info :resolution)) 2)
-        min-x (- origin-x shift-x)
-        max-x (+ origin-x shift-x)
-        min-y (- origin-y shift-y)
-        max-y (+ origin-y shift-y)]
+  (let [min-x 0
+        max-x (-> map :info :width)
+        min-y 0
+        max-y (-> map :info :height)]
     (loop [particles []]
       (if (= num-paticles (count particles))
         particles
         (let [proposal (random-pose min-x max-x min-y max-y)]
           (if (inhabitable? map proposal)
-            (recur (conj particles proposal))
-            (recur particles)))))))
+            (recur (conj particles (map->world map proposal)))
+            (recur particles))))))
+  #_(let [origin-x (-> map :info :origin :position :x)
+          origin-y (-> map :info :origin :position :y)
+          shift-x (/ (* (-> map :info :width) (-> map :info :resolution)) 2)
+          shift-y (/ (* (-> map :info :height) (-> map :info :resolution)) 2)
+          min-x (- origin-x shift-x)
+          max-x (+ origin-x shift-x)
+          min-y (- origin-y shift-y)
+          max-y (+ origin-y shift-y)]
+      (loop [particles []]
+        (if (= num-paticles (count particles))
+          particles
+          (let [proposal (random-pose min-x max-x min-y max-y)]
+            (if (inhabitable? map proposal)
+              (recur (conj particles proposal))
+              (recur particles)))))))
 
 (defn gaussian-initialization [map pose])
 

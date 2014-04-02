@@ -130,12 +130,12 @@
         (publish node "/pose2" fake-pose)))))
 
 
-
-(defn publish-uniform-cloud [node]
+;; Potentiall an error (not sure if it looks odd because there is no transform with the map frame
+(defn publish-uniform-cloud [node] 
   (when (running? node)
     (let [uniform-cloud (geometry-msgs/pose-array
                           :header (std-msgs/header :frameId "base_link")
-                          :poses (uniform-initialization @*map* 1000))
+                          :poses (uniform-initialization @*map* 5000))
           pose (geometry-msgs/pose-stamped
                 :header (std-msgs/header :frameId "base_link")
                 :pose (pose-estimate (:poses uniform-cloud)))]
