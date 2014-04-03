@@ -170,3 +170,26 @@
 ;;                                                              tf nil))
 ;;                      (Thread/sleep 100)))
 
+
+(defn test-apply-motion-model [amcl-node]
+  (let [init (geometry-msgs/pose-array
+              :header (std-msgs/header :frameId "map")
+              :poses [(geometry-msgs/pose
+                       :position (geometry-msgs/point :x 16 :y 16))])]
+    (with-log-level :trace
+      (try
+        (loop [particles init]
+          (let [control (geometry-msgs/transform
+                         :translation (geometry-msgs/vector3 :x 0)
+                         :rotation (heading->quat (- (/ Math/PI 8))))
+                updated-particles (apply-motion-model control particles)
+                pose-stamped (assoc (pose-estimate (:poses updated-particles))
+                               :header (std-msgs/header :frameId "map"))
+                tf   (update-tf (:pose pose-stamped) tf-ch)]
+            (debug (map vals (vals (:pose pose-stamped))))
+            (publish amcl "/particlecloud" updated-particles)
+            (publish amcl "/pose2" pose-stamped)
+            (publish amcl "/tf" tf)
+            (Thread/sleep 1000)
+            (recur updated-particles)))
+        (catch Exception e (error e))))))

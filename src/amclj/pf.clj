@@ -89,27 +89,7 @@
 ;; OccupancyGrid
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-#_(defn map-get [map x y]
-    (let [width (-> map :info :width)
-          height (-> map :info :height)
-          idx (+ x (* y width))]
-      (assert (and (>= x 0) (>= y 0) (< x width) (< y height)))
-      (sel (-> map :data) x y)))
 
-
-;; // Convert from map index to world coords
-;; #define MAP_WXGX(map, i) (map->origin_x + (((i) - map->size_x / 2) * map->scale))
-;; #define MAP_WYGY(map, j) (map->origin_y + (((j) - map->size_y / 2) * map->scale))
-
-;; // Convert from world coords to map coords
-;; #define MAP_GXWX(map, x) (floor((x - map->origin_x) / map->scale + 0.5) + map->size_x / 2)
-;; #define MAP_GYWY(map, y) (floor((y - map->origin_y) / map->scale + 0.5) + map->size_y / 2)
-
-;; // Test to see if the given map coords lie within the absolute map bounds.
-;; #define MAP_VALID(map, i, j) ((i >= 0) && (i < map->size_x) && (j >= 0) && (j < map->size_y))
-
-;; // Compute the cell index for the given map coords.
-;; #define MAP_INDEX(map, i, j) ((i) + (j) * map->size_x)
 (defn inhabitable?
   "Can a robot occupy the given location in the map?"
   [map pose]
@@ -122,42 +102,14 @@
   [map pose]
   (-> pose
       (update-in [:position :x] #(* % (-> map :info :resolution)))
-      (update-in [:position :y] #(* % (-> map :info :resolution))))
-  ;; (let [origin-x (-> map :info :origin :position :x)
-  ;;       origin-y (-> map :info :origin :position :y)
-  ;;       height  (-> map :info :height)
-  ;;       width (-> map :info :width)
-  ;;       resolution (-> map :info :resolution)
-  ;;       mx (-> pose :position :x)
-  ;;       my (-> pose :position :y)
-  ;;       x (+ origin-x (* (- mx (/ width 2)) resolution))
-  ;;       y (+ origin-y (* (- my (/ width 2)) resolution))]
-  ;;   (-> pose
-  ;;       (assoc-in [:position :x] x)
-  ;;       (assoc-in [:position :y] y)))
-  )
+      (update-in [:position :y] #(* % (-> map :info :resolution)))))
 
 (defn world->map
   "Convert from world coordinates to map coorindates"
   [map pose]
   (-> pose
       (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
-      (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution)))))
-  ;; #_(let [origin-x (-> map :info :origin :position :x)
-  ;;       origin-y (-> map :info :origin :position :y)
-  ;;       height  (-> map :info :height)
-  ;;       width (-> map :info :width)
-  ;;       resolution (-> map :info :resolution)
-  ;;       x (-> pose :position :x)
-  ;;       y (-> pose :position :y)
-  ;;       mx (+ (Math/floor (+ (/ (- x origin-x) resolution) 0.5))
-  ;;             (/ width 2))
-  ;;       my (+ (Math/floor (+ (/ (- y origin-y) resolution) 0.5))
-  ;;             (/ height 2))]
-  ;;   (-> pose
-  ;;       (assoc-in [:position :x] mx)
-  ;;       (assoc-in [:position :y] my)))
-  )
+      (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution))))))
 
 (defn random-pose
   "Create a pose uniformly sampled from the grid defined by a map."
@@ -214,8 +166,8 @@
 
 (defn add-pose
   "Add a number poses together"
-  [a b & rest]
-  (let [vals (if (nil? rest) [a b] (concat [a b] rest))]
+  [a & rest]
+  (let [vals (if (nil? rest) [a] (concat [a] rest))]
     (geometry-msgs/pose
      :position
      (geometry-msgs/point
@@ -228,6 +180,23 @@
       :y (reduce #(+ %1 (get-in %2 [:orientation :y])) 0 vals)
       :z (reduce #(+ %1 (get-in %2 [:orientation :z])) 0 vals)
       :w (reduce #(+ %1 (get-in %2 [:orientation :w])) 0 vals)))))
+
+(defn minus-pose
+  "Add a number poses together"
+  [a b & rest]
+  (let [vals (if (nil? rest) [a b] (concat [a b] rest))]
+    (geometry-msgs/pose
+     :position
+     (geometry-msgs/point
+      :x (reduce #(- %1 (get-in %2 [:position :x])) 0 vals)
+      :y (reduce #(- %1 (get-in %2 [:position :y])) 0 vals)
+      :z (reduce #(- %1 (get-in %2 [:position :z])) 0 vals))
+     :orientation
+     (geometry-msgs/quaternion
+      :x (reduce #(- %1 (get-in %2 [:orientation :x])) 0 vals)
+      :y (reduce #(- %1 (get-in %2 [:orientation :y])) 0 vals)
+      :z (reduce #(- %1 (get-in %2 [:orientation :z])) 0 vals)
+      :w (reduce #(- %1 (get-in %2 [:orientation :w])) 0 vals)))))
 
 (defn pose-estimate
   "Estimate the pose from the particle cloud."
@@ -252,15 +221,6 @@
 (defn beam-range-finder-model [])
 (defn likelihood-field-range-finder-model [])
 
-(defn sample-motion-model [control particle]
-  (-> particle
-      (update-in [:position :x] (partial + (* (-> control :translation :x) (stats/sample-normal 1 :mean 0 :sd 0.2))))
-      (update-in [:position :y] (partial + (* (-> control :translation :y) (stats/sample-normal 1 :mean 0 :sd 0.2))))))
-
-(defn odom-update [control particles]
-  (assoc particles :poses
-         (for [particle (:poses particles)]
-           (sample-motion-model control particle))))
 
 (defn measurement-model [measurement particle map])
 
@@ -290,7 +250,7 @@
   (loop [tf (<!! tf-ch)]
     (if (and (= parent (-> tf :transforms first :header :frameId))
              (= child  (-> tf :transforms first :childFrameId)))
-      (-> tf :transforms first)
+      (-> tf :transforms first :transform)
       (recur (<!! tf-ch)))))
 
 (defn update-tf
@@ -304,14 +264,14 @@
                    :transform
                    (geometry-msgs/transform
                     :translation (geometry-msgs/vector3
-                                  :x (- (-> pose :position :x) (-> odom-tf :transform :translation :x))
-                                  :y (- (-> pose :position :y) (-> odom-tf :transform :translation :y))
-                                  :z (- (-> pose :position :z) (-> odom-tf :transform :translation :z)))
+                                  :x (- (-> pose :position :x) (-> odom-tf :translation :x))
+                                  :y (- (-> pose :position :y) (-> odom-tf :translation :y))
+                                  :z (- (-> pose :position :z) (-> odom-tf :translation :z)))
                     :rotation  (geometry-msgs/quaternion 
-                                :w (- (-> pose :orientation :w) (-> odom-tf :transform :rotation :w))  
-                                :x (- (-> pose :orientation :x) (-> odom-tf :transform :rotation :x))  
-                                :y (- (-> pose :orientation :y) (-> odom-tf :transform :rotation :y))  
-                                :z (- (-> pose :orientation :z) (-> odom-tf :transform :rotation :z)))))]
+                                :w (- (-> pose :orientation :w) (-> odom-tf :rotation :w))  
+                                :x (- (-> pose :orientation :x) (-> odom-tf :rotation :x))  
+                                :y (- (-> pose :orientation :y) (-> odom-tf :rotation :y))  
+                                :z (- (-> pose :orientation :z) (-> odom-tf :rotation :z)))))]
     (tf2-msgs/tf :transforms [transform])))
 
 (defn gaussian-noise
@@ -334,12 +294,33 @@
                                     :z 0)
      :orientation (rotate-quaternion (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
 
+
+(defn sample-motion-model [control particle]
+  (let [diff-x (max 0.0001 (-> control :translation :x))
+        diff-y (max 0.0001 (-> control :translation :y))
+        diff-heading (max 0.05 (quat->heading (-> control :rotation)))]
+    (log/debug diff-x diff-y diff-heading)
+    (-> particle
+        (update-in [:position :x]
+                   #(+ % (* diff-x (+ 1 (stats/sample-normal 1 :mean 0 :sd 0.01)))))
+        (update-in [:position :x]
+                   #(+ % (* diff-y (+ 1 (stats/sample-normal 1 :mean 0 :sd 0.01)))))
+        (update-in [:orientation]
+                   #(rotate-quaternion % (+ diff-heading (* diff-heading (stats/sample-normal 1 :mean 0 :sd 0.01))))))))
+
+(defn odom-update [control particles]
+  (assoc particles :poses
+         (for [particle (:poses particles)]
+           (sample-motion-model control particle))))
+
 ;; TODO
 (defn apply-motion-model
   "Updates the particle cloud based on the control (and implicitly the
   motion model)"
   [control particles]
-  (throw (UnsupportedOperationException.)))
+  (assoc particles :poses
+         (for [particle (:poses particles)]
+           (sample-motion-model control particle))))
 
 ;; TODO
 (defn apply-sensor-model
@@ -356,30 +337,29 @@
 
 (defn mcl* [tf-ch laser-ch pose-atom map-atom result-ch]
   (try
-    (let [particles (initialize-pf @map-atom 100 :pose @pose-atom)]
+    (let [part-init (initialize-pf @map-atom 4 :pose @pose-atom)]
       ;; clear it out when we're done
       (reset! pose-atom nil)
-      (log/debug (str "Particle initialized: " (count particles) " particles"))
-      (loop [particles particles
+      (loop [particles part-init
              prev-transform (geometry-msgs/transform)]
         (let [particles' (if (nil? @pose-atom) particles
-                             (let [p (initialize-pf @map-atom 100 :pose @pose-atom)]
+                             (let [p (initialize-pf @map-atom 4 :pose @pose-atom)]
                                (reset! pose-atom nil) p))
-              _ (log/trace "|particles'| = " (count particles'))
               curr-transform (get-transform tf-ch "odom" "base_footprint")
-              _ (log/debug "Received transform")
-              ;;control (calculate-control  cur-transform prev-transform)
-              ;;particles' (apply-motion-model control particles)
-              ;;weight-particles (apply-sensor-model (<!! laser-ch) particles' @map)
-              ;;particles'' (weighted-sampled weight-particles)
-              particles''' particles'
+              control (calculate-control  curr-transform prev-transform)
+              _ (log/trace "Control:" (map vals (vals control)))
+              particles'' (apply-motion-model control particles')
+              ;;weight-particles (apply-sensor-model (<!! laser-ch) particles'' @map)
+              ;;particles''' (weighted-sampled weight-particles)
+              particles''' particles''
               pose-stamped (assoc (pose-estimate (:poses particles'''))
                              :header (std-msgs/header :frameId "map"))
-              _ (log/debug "Pose estimated")
-              tf   (update-tf (:pose pose-stamped) tf-ch)
-              _ (log/debug "TF calculated")]
+
+              tf   (update-tf (:pose pose-stamped) tf-ch)]
+          (log/trace "estimate(p2) == estimate(p3): " (= (pose-estimate (:poses particles''))
+                                                         (pose-estimate (:poses particles'''))))
           (when (>!! result-ch [particles''' pose-stamped tf])
-            (log/debug "Result pushed to channel")
+            ;;(log/debug "Result pushed to channel")
             (recur particles''' curr-transform)))))
     (catch Exception e
       (log/error e))))
