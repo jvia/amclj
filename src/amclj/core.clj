@@ -125,7 +125,9 @@
                                            #(amclj.pf/gaussian-noise (-> pose :pose :pose) [0 0.5] [0 0.01])))
             fake-pose (geometry-msgs/pose-stamped
                        :header (std-msgs/header :frameId "base_link")
-                       :pose (pose-estimate (:poses fake-cloud)))]
+                       :pose (pose-estimate (:poses fake-cloud)))
+            ;;new-tf (update-tf )
+            ]
         (publish node "/particlecloud" fake-cloud)
         (publish node "/pose2" fake-pose)))))
 
@@ -142,3 +144,14 @@
 
       (publish node "/particlecloud" uniform-cloud)
       (publish node "/pose2" pose))))
+
+
+;; This code repeatedly publishes transforms.
+;;
+;; (repeatedly 500 #(do (publish amcl "/tf" (amclj.pf/update-tf (geometry-msgs/pose-with-covariance-stamped
+;;                                  :pose-cov (geometry-msgs/pose-with-covariance
+;;                                             :pose (geometry-msgs/pose
+;;                                                    :position (geometry-msgs/vector3 :x 16.5 :y 16.18)
+;;                                                    :orientation (geometry-msgs/quaternion :z 0.97 :w 0.23))))
+;;                                                                         tf nil))
+;;                                 (Thread/sleep 100)))

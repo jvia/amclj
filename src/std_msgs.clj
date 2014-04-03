@@ -48,7 +48,13 @@
       (.setData (org.ros.message.Time. (:secs time) (:nsecs time))))))
 
 (defn time [& {:keys [secs nsecs] :or {secs 0 nsecs 0}}]
-  (->Time secs nsecs))
+  (if (and (zero? secs) (zero? nsecs))
+    (let [time (System/nanoTime)
+          secs (int (/ time 1000000000))
+          nsecs (int (mod time 1000000000))]
+      (->Time secs nsecs))
+    (->Time secs nsecs)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Header
