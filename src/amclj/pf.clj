@@ -4,7 +4,8 @@
             [amclj.model :as model]
             [incanter.core :refer :all]
             [incanter.stats :as stats]
-            [clojure.core.async :refer [<!! <! >! >!! go chan]]))
+            [clojure.core.async :refer [<!! <! >! >!! go go-loop chan]]
+            [taoensso.timbre :as log]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Quaternions
@@ -176,25 +177,40 @@
 
 (defn uniform-initialization
   "Uniform create particles across the map"
-  [map num-paticles]
-  (let [min-x 0
-        max-x (-> map :info :width)
-        min-y 0
-        max-y (-> map :info :height)]
+  [map num-particles]
+  (log/trace  (type map) (str num-particles ": " (type num-particles)))
+  (let [min-x 0, max-x (-> map :info :width)
+        min-y 0, max-y (-> map :info :height)]
     (loop [particles []]
-      (if (= num-paticles (count particles))
-        particles
+      (if (= num-particles (count particles))
+        (do (log/trace "Returning" (count particles) "particles")
+            particles)
         (let [proposal (random-pose min-x max-x min-y max-y)]
           (if (inhabitable? map proposal)
             (recur (conj particles (map->world map proposal)))
             (recur particles)))))))
 
-(defn gaussian-initialization [map pose])
+(defn gaussian-initialization [map num-particles pose]
+  ;; Assumes a geometry_msgs.PoseWithCovarianceStamped
+  (repeatedly num-particles
+              #(gaussian-noise (-> pose :pose :pose) [0 0.1] [0 0.01])))
 
-(defn initialize-pf [map & {:keys [pose]}]
-  (if (nil? pose)
-    (uniform-initialization map)
-    (gaussian-initialization map pose)))
+
+(defn initialize-pf
+  "Initialize a particle filter based on a map and optionally on a
+  pose.
+
+  If no pose is provided, the particles are uniformly distributed
+  among the map. If a pose is provided, then the particles are
+  distributed in a Gaussian about the pose."
+  [map num-particles & {:keys [pose] :or {pose nil}}]
+  (geometry-msgs/pose-array
+   :header (std-msgs/header :frameId "map")
+   :poses (if (nil? pose)
+            (do (log/debug "Uniform initialization")
+                (uniform-initialization map num-particles))
+            (do (log/debug "Gaussian initialization")
+                (gaussian-initialization map num-particles pose)))))
 
 (defn add-pose
   "Add a number poses together"
@@ -219,18 +235,18 @@
   (let [raw-estimate (apply add-pose particles)
         raw-heading (reduce + (map (comp quat->heading :orientation) particles))
         normalizer (count particles)]
-    (geometry-msgs/pose
-     :position
-     (geometry-msgs/point :x (/ (get-in raw-estimate [:position :x]) normalizer)
-                          :y (/ (get-in raw-estimate [:position :y]) normalizer)
-                          :y (/ (get-in raw-estimate [:position :y]) normalizer))
-     :orientation
-     #_(heading->quat (/ raw-heading normalizer))
-     (geometry-msgs/quaternion 
-      :x (/ (get-in raw-estimate [:orientation :x]) normalizer)
-      :y (/ (get-in raw-estimate [:orientation :y]) normalizer)
-      :z (/ (get-in raw-estimate [:orientation :z]) normalizer)
-      :w (/ (get-in raw-estimate [:orientation :w]) normalizer)))))
+    (geometry-msgs/pose-stamped
+     :pose
+     (geometry-msgs/pose
+      :position (geometry-msgs/point
+                 :x (/ (get-in raw-estimate [:position :x]) normalizer)
+                 :y (/ (get-in raw-estimate [:position :y]) normalizer)
+                 :y (/ (get-in raw-estimate [:position :y]) normalizer))
+      :orientation (geometry-msgs/quaternion 
+                    :x (/ (get-in raw-estimate [:orientation :x]) normalizer)
+                    :y (/ (get-in raw-estimate [:orientation :y]) normalizer)
+                    :z (/ (get-in raw-estimate [:orientation :z]) normalizer)
+                    :w (/ (get-in raw-estimate [:orientation :w]) normalizer))))))
 
 
 (defn beam-range-finder-model [])
@@ -243,50 +259,10 @@
 
 (defn odom-update [control particles]
   (assoc particles :poses
-            (for [particle (:poses particles)]
-              (sample-motion-model control particle))))
+         (for [particle (:poses particles)]
+           (sample-motion-model control particle))))
 
 (defn measurement-model [measurement particle map])
-
-#_(defn mcl
-  "Given a channel to TF data, LaserScan data"
-  [particles control measurement map]
-  (let [prediction (map #(sample-motion-model control %) particles)
-        update (map #(measurement-model measurement % map) particles)]
-    (for [[particle weight] update]
-      (if (>= weight (Math/random))
-        particle))))
-
-(defn mcl* [tf-ch laser-ch pose-atom map-atom result-ch]
-  (go
-    (loop []
-      (>! result-ch
-          [(geometry-msgs/pose-array)
-           (geometry-msgs/pose-stamped)
-           (<! tf-ch)])
-      (recur))))
-
-(defn monte-carlo-localization
-  "Perform monte carlo localization.
-
-Expects:
-  - tf-ch: a channel of tf2_msgs.TFMessage data
-  - laser-ch: a channel of sensor_msgs.LaserScan data
-  - pose-atom: an atom potentially containing an initial geometry_msgs.PoseWithCovarianceStamped
-  - map-atom: an atom containing the map in the form nav_msgs.OccupancyGrid
-
-Returns:
-  - a channel from which [geometry_msgs.PoseArray geometry_msgs.PoseStamped tf2_msgs.TFMessage] 
-    data can be pulled and then published to ROS.
-"
-  [tf-ch laser-ch pose-atom map-atom]
-  (let [result-ch (chan)]
-    (mcl* tf-ch laser-ch pose-atom map-atom result-ch)
-    result-ch))
-
-;;(defn amcl [particles control measurement map])
-
-;;(defn kld-mcl [particles control measurement map epsilon delta])
 
 
 (defn calculate-control
@@ -299,11 +275,11 @@ Returns:
           (str "old-transform does not have a translation field: " (type old-transform)))
   (println (type new-transform) (type old-transform))
   (if (nil? old-transform)
-      new-transform
-      (geometry-msgs/transform
-       :translation (geometry-msgs/vector3
-                     :x (- (-> new-transform :translation :x) (-> old-transform :translation :x))
-                     :y (- (-> new-transform :translation :y) (-> old-transform :translation :y))))))
+    new-transform
+    (geometry-msgs/transform
+     :translation (geometry-msgs/vector3
+                   :x (- (-> new-transform :translation :x) (-> old-transform :translation :x))
+                   :y (- (-> new-transform :translation :y) (-> old-transform :translation :y))))))
 
 
 (defn get-transform
@@ -319,9 +295,8 @@ Returns:
 
 (defn update-tf
   "- pose-estimate: a geometry_msgs.Pose
-   - tf: current tf
-   - time: current time"
-  [pose tf-ch time]
+   - tf: current tf"
+  [pose tf-ch]
   (let [odom-tf (get-transform tf-ch "odom" "base_footprint")
         transform (geometry-msgs/transform-stamped
                    :header (std-msgs/header :frameId "/map")
@@ -358,3 +333,77 @@ Returns:
                                     :y (+ y (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
                                     :z 0)
      :orientation (rotate-quaternion (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
+
+;; TODO
+(defn apply-motion-model
+  "Updates the particle cloud based on the control (and implicitly the
+  motion model)"
+  [control particles]
+  (throw (UnsupportedOperationException.)))
+
+;; TODO
+(defn apply-sensor-model
+  "Returns a set of weighted paticles based on the scan the measurement model."
+  [scan particles map]
+  (throw (UnsupportedOperationException.)))
+
+;; TODO
+(defn weighted-sample
+  "Sample count many particles to propagate to the next generation."
+  [count weighted-particles]
+  (throw (UnsupportedOperationException.)))
+
+
+(defn mcl* [tf-ch laser-ch pose-atom map-atom result-ch]
+  (try
+    (let [particles (initialize-pf @map-atom 100 :pose @pose-atom)]
+      ;; clear it out when we're done
+      (reset! pose-atom nil)
+      (log/debug (str "Particle initialized: " (count particles) " particles"))
+      (loop [particles particles
+             prev-transform (geometry-msgs/transform)]
+        (let [particles' (if (nil? @pose-atom) particles
+                             (let [p (initialize-pf @map-atom 100 :pose @pose-atom)]
+                               (reset! pose-atom nil) p))
+              _ (log/trace "|particles'| = " (count particles'))
+              curr-transform (get-transform tf-ch "odom" "base_footprint")
+              _ (log/debug "Received transform")
+              ;;control (calculate-control  cur-transform prev-transform)
+              ;;particles' (apply-motion-model control particles)
+              ;;weight-particles (apply-sensor-model (<!! laser-ch) particles' @map)
+              ;;particles'' (weighted-sampled weight-particles)
+              particles''' particles'
+              pose-stamped (assoc (pose-estimate (:poses particles'''))
+                             :header (std-msgs/header :frameId "map"))
+              _ (log/debug "Pose estimated")
+              tf   (update-tf (:pose pose-stamped) tf-ch)
+              _ (log/debug "TF calculated")]
+          (when (>!! result-ch [particles''' pose-stamped tf])
+            (log/debug "Result pushed to channel")
+            (recur particles''' curr-transform)))))
+    (catch Exception e
+      (log/error e))))
+
+(defn monte-carlo-localization
+  "Perform monte carlo localization.
+
+Expects:
+  - tf-ch: a channel of tf2_msgs.TFMessage data
+  - laser-ch: a channel of sensor_msgs.LaserScan data
+  - pose-atom: an atom potentially containing an initial geometry_msgs.PoseWithCovarianceStamped
+  - map-atom: an atom containing the map in the form nav_msgs.OccupancyGrid
+
+Returns:
+  - a channel from which [geometry_msgs.PoseArray geometry_msgs.PoseStamped tf2_msgs.TFMessage] 
+    data can be pulled and then published to ROS.
+"
+  [tf-ch laser-ch pose-atom map-atom]
+  (let [result-ch (chan)]
+    (go (mcl* tf-ch laser-ch pose-atom map-atom result-ch))
+    result-ch))
+
+;;(defn amcl [particles control measurement map])
+
+;;(defn kld-mcl [particles control measurement map epsilon delta])
+
+

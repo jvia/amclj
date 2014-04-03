@@ -17,8 +17,8 @@
   [x]
   (Thread/sleep 2000) x)
 
-(def ^:dynamic *map* (atom nil))
-(def ^:dynamic *pose* (atom nil))
+;;(def ^:dynamic *map* (atom nil))
+;;(def ^:dynamic *pose* (atom nil))
 (def laser-ch (chan (sliding-buffer 1)))
 (def tf-ch (chan (sliding-buffer 1)))
 (def odom (chan (sliding-buffer 1)))
@@ -51,18 +51,19 @@
     (recur)))
 
 (defn -main []
+  (info "Starting node")
   (let [;;amcl (make-amcl-node)
-          mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
-      (loop []
-        (let [[particles pose tf] (<!! mcl-ch)]
-          (debug (:header particles))
-          (debug pose)
-          (debug tf)
-          (recur)
-          #_(-> amcl
-                (publish "/particlecloud" particles)
-                (publish "/pose2" pose)
-                (publish "/tf" tf))))))
+        mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
+    (debug "Results channel created.")
+    (loop []
+      (let [[particles pose tf] (<!! mcl-ch)]
+        (debug (str "Recieved data: ["
+                    (type particles) ", " (type pose) ", " (type tf) "]"))
+        (publish amcl "/particlecloud" particles)
+        (publish amcl "/tf" tf)
+        (publish amcl "/pose2" pose)
+        (debug "Published data")
+        (recur)))))
 
 ;; (defn odom-printer []
 ;;   (when-let [pose @*pose*]
