@@ -4,7 +4,7 @@
             [amclj.model :as model]
             [incanter.core :refer :all]
             [incanter.stats :as stats]
-            [clojure.core.async :refer [<!!]]))
+            [clojure.core.async :refer [<!! <! >! >!! go chan]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Quaternions
@@ -187,22 +187,7 @@
         (let [proposal (random-pose min-x max-x min-y max-y)]
           (if (inhabitable? map proposal)
             (recur (conj particles (map->world map proposal)))
-            (recur particles))))))
-  #_(let [origin-x (-> map :info :origin :position :x)
-          origin-y (-> map :info :origin :position :y)
-          shift-x (/ (* (-> map :info :width) (-> map :info :resolution)) 2)
-          shift-y (/ (* (-> map :info :height) (-> map :info :resolution)) 2)
-          min-x (- origin-x shift-x)
-          max-x (+ origin-x shift-x)
-          min-y (- origin-y shift-y)
-          max-y (+ origin-y shift-y)]
-      (loop [particles []]
-        (if (= num-paticles (count particles))
-          particles
-          (let [proposal (random-pose min-x max-x min-y max-y)]
-            (if (inhabitable? map proposal)
-              (recur (conj particles proposal))
-              (recur particles)))))))
+            (recur particles)))))))
 
 (defn gaussian-initialization [map pose])
 
@@ -211,7 +196,9 @@
     (uniform-initialization map)
     (gaussian-initialization map pose)))
 
-(defn add-pose [a b & rest]
+(defn add-pose
+  "Add a number poses together"
+  [a b & rest]
   (let [vals (if (nil? rest) [a b] (concat [a b] rest))]
     (geometry-msgs/pose
      :position
@@ -226,7 +213,9 @@
       :z (reduce #(+ %1 (get-in %2 [:orientation :z])) 0 vals)
       :w (reduce #(+ %1 (get-in %2 [:orientation :w])) 0 vals)))))
 
-(defn pose-estimate [particles]
+(defn pose-estimate
+  "Estimate the pose from the particle cloud."
+  [particles]
   (let [raw-estimate (apply add-pose particles)
         raw-heading (reduce + (map (comp quat->heading :orientation) particles))
         normalizer (count particles)]
@@ -246,24 +235,75 @@
 
 (defn beam-range-finder-model [])
 (defn likelihood-field-range-finder-model [])
+
 (defn sample-motion-model [control particle]
-  )
+  (-> particle
+      (update-in [:position :x] (partial + (* (-> control :translation :x) (stats/sample-normal 1 :mean 0 :sd 0.2))))
+      (update-in [:position :y] (partial + (* (-> control :translation :y) (stats/sample-normal 1 :mean 0 :sd 0.2))))))
+
+(defn odom-update [control particles]
+  (assoc particles :poses
+            (for [particle (:poses particles)]
+              (sample-motion-model control particle))))
 
 (defn measurement-model [measurement particle map])
 
-(defn mcl [particles control measurement map]
+#_(defn mcl
+  "Given a channel to TF data, LaserScan data"
+  [particles control measurement map]
   (let [prediction (map #(sample-motion-model control %) particles)
         update (map #(measurement-model measurement % map) particles)]
     (for [[particle weight] update]
       (if (>= weight (Math/random))
         particle))))
 
-(defn amcl [particles control measurement map])
+(defn mcl* [tf-ch laser-ch pose-atom map-atom result-ch]
+  (go
+    (loop []
+      (>! result-ch
+          [(geometry-msgs/pose-array)
+           (geometry-msgs/pose-stamped)
+           (<! tf-ch)])
+      (recur))))
 
-(defn kld-mcl [particles control measurement map epsilon delta])
+(defn monte-carlo-localization
+  "Perform monte carlo localization.
 
-(defn calculate-control [prev-odom curr-odom]
-  )
+Expects:
+  - tf-ch: a channel of tf2_msgs.TFMessage data
+  - laser-ch: a channel of sensor_msgs.LaserScan data
+  - pose-atom: an atom potentially containing an initial geometry_msgs.PoseWithCovarianceStamped
+  - map-atom: an atom containing the map in the form nav_msgs.OccupancyGrid
+
+Returns:
+  - a channel from which [geometry_msgs.PoseArray geometry_msgs.PoseStamped tf2_msgs.TFMessage] 
+    data can be pulled and then published to ROS.
+"
+  [tf-ch laser-ch pose-atom map-atom]
+  (let [result-ch (chan)]
+    (mcl* tf-ch laser-ch pose-atom map-atom result-ch)
+    result-ch))
+
+;;(defn amcl [particles control measurement map])
+
+;;(defn kld-mcl [particles control measurement map epsilon delta])
+
+
+(defn calculate-control
+  "Given a channel of TF data, find an odom to base_footprint
+  transform as the control."
+  [new-transform old-transform]
+  (assert (not (nil? (:translation new-transform)))
+          (str "new-transform does not have a translation field: " (type new-transform)))
+  (assert (not (nil? (:translation old-transform)))
+          (str "old-transform does not have a translation field: " (type old-transform)))
+  (println (type new-transform) (type old-transform))
+  (if (nil? old-transform)
+      new-transform
+      (geometry-msgs/transform
+       :translation (geometry-msgs/vector3
+                     :x (- (-> new-transform :translation :x) (-> old-transform :translation :x))
+                     :y (- (-> new-transform :translation :y) (-> old-transform :translation :y))))))
 
 
 (defn get-transform
@@ -278,7 +318,7 @@
       (recur (<!! tf-ch)))))
 
 (defn update-tf
-  "- pose-estimate: a geometry_msgs.PoseWithCovarianceStamped
+  "- pose-estimate: a geometry_msgs.Pose
    - tf: current tf
    - time: current time"
   [pose tf-ch time]
@@ -289,28 +329,15 @@
                    :transform
                    (geometry-msgs/transform
                     :translation (geometry-msgs/vector3
-                                  :x (- (-> pose :pose :pose :position :x) (-> odom-tf :transform :translation :x))
-                                  :y (- (-> pose :pose :pose :position :y) (-> odom-tf :transform :translation :y))
-                                  :z (- (-> pose :pose :pose :position :z) (-> odom-tf :transform :translation :z)))
+                                  :x (- (-> pose :position :x) (-> odom-tf :transform :translation :x))
+                                  :y (- (-> pose :position :y) (-> odom-tf :transform :translation :y))
+                                  :z (- (-> pose :position :z) (-> odom-tf :transform :translation :z)))
                     :rotation  (geometry-msgs/quaternion 
-                                :w (- (-> pose :pose :pose :orientation :w) (-> odom-tf :transform :rotation :w))  
-                                :x (- (-> pose :pose :pose :orientation :x) (-> odom-tf :transform :rotation :x))  
-                                :y (- (-> pose :pose :pose :orientation :y) (-> odom-tf :transform :rotation :y))  
-                                :z (- (-> pose :pose :pose :orientation :z) (-> odom-tf :transform :rotation :z)))))]
+                                :w (- (-> pose :orientation :w) (-> odom-tf :transform :rotation :w))  
+                                :x (- (-> pose :orientation :x) (-> odom-tf :transform :rotation :x))  
+                                :y (- (-> pose :orientation :y) (-> odom-tf :transform :rotation :y))  
+                                :z (- (-> pose :orientation :z) (-> odom-tf :transform :rotation :z)))))]
     (tf2-msgs/tf :transforms [transform])))
-
-;; // TF should be *difference* between pose (actual, i.e. from laser) and odom position
-;; transform.translation.x = pose.pose.pose.position.x - odomtf.translation.x;
-;; transform.translation.y = pose.pose.pose.position.y - odomtf.translation.y;
-;; transform.translation.z = pose.pose.pose.position.z - odomtf.translation.z;
-;; transform.rotation.w = pose.pose.pose.orientation.w - odomtf.rotation.w;
-;; transform.rotation.x = pose.pose.pose.orientation.x - odomtf.rotation.x;
-;; transform.rotation.y = pose.pose.pose.orientation.y - odomtf.rotation.y;
-;; transform.rotation.z = pose.pose.pose.orientation.z - odomtf.rotation.z;
-
-
-
-
 
 (defn gaussian-noise
   "Apply noise to a geometry_msgs.Pose object. Noises should be

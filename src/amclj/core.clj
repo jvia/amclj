@@ -3,8 +3,8 @@
             [tf2-msgs]
             [std-msgs]
             [amclj.ros :refer :all]
-            [amclj.pf :refer [uniform-initialization calculate-control mcl pose-estimate]]
-            [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer]]
+            [amclj.pf :refer :all]
+            [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer alts!! timeout]]
             [clojure.core.async :as async]
             [clojure.reflect :as reflect]
             [incanter.stats :as stats]
@@ -19,14 +19,9 @@
 
 (def ^:dynamic *map* (atom nil))
 (def ^:dynamic *pose* (atom nil))
-(def scan (chan (sliding-buffer 1)))
-(def pose (chan (sliding-buffer 1)))
-(def tf (chan (sliding-buffer 1)))
+(def laser-ch (chan (sliding-buffer 1)))
+(def tf-ch (chan (sliding-buffer 1)))
 (def odom (chan (sliding-buffer 1)))
-
-(defn avg [coll]
-  (/ (reduce + coll) (count coll)))
-
 
 (defn make-amcl-node []
   (let [node (start (rosnode "amcl"))]
@@ -34,9 +29,9 @@
     (try
       (-> node
           ;; Subscriptions
-          (subscribe "/scan" sensor_msgs.LaserScan #(go (>! scan %)))
-          (subscribe  "/tf" tf2_msgs.TFMessage #(go (>! tf %)))
-          (subscribe  "/odom" nav_msgs.Odometry #(go (>! odom %)))
+          (subscribe "/scan" sensor_msgs.LaserScan #(go (>! laser-ch %)))
+          (subscribe  "/tf" tf2_msgs.TFMessage #(go (>! tf-ch %)))
+          #_(subscribe  "/odom" nav_msgs.Odometry #(go (>! odom %)))
           (subscribe "/initialpose" geometry_msgs.PoseWithCovarianceStamped #(do (debug "Received pose") (reset! *pose* %)))
           (subscribe "/map" nav_msgs.OccupancyGrid #(do (debug "Received map") (reset! *map* %)))
           ;; Publications
@@ -48,7 +43,6 @@
         (error e "Error initializing node")
         node))))
 
-(defn update-tf [pose tf time])
 
 (defn wait-for-map []
   (when (nil? @*map*)
@@ -56,102 +50,122 @@
     (Thread/sleep 1000)
     (recur)))
 
-#_(def amcl (make-amcl-node))
+(defn -main []
+  (let [;;amcl (make-amcl-node)
+          mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
+      (loop []
+        (let [[particles pose tf] (<!! mcl-ch)]
+          (debug (:header particles))
+          (debug pose)
+          (debug tf)
+          (recur)
+          #_(-> amcl
+                (publish "/particlecloud" particles)
+                (publish "/pose2" pose)
+                (publish "/tf" tf))))))
+
+;; (defn odom-printer []
+;;   (when-let [pose @*pose*]
+;;     (loop [particles (geometry-msgs/pose-array
+;;                       :header (std-msgs/header :frameId "map")
+;;                       :poses (repeatedly 100 #(gaussian-noise (-> pose :pose :pose) [0 0.1] [0 0.01])))
+;;            curr-odom (:transform (get-transform tf "odom" "base_footprint"))
+;;            prev-odom nil]
+;;       (let [control (calculate-control curr-odom prev-odom)
+;;             particles' (odom-update control particles)
+;;             pose (geometry-msgs/pose-stamped :header (std-msgs/header :frameId "map")
+;;                                              :pose (pose-estimate (:poses particles')))
+;;             tf' (update-tf (:pose pose) tf nil)]
+;;         (debug (map vals (vals control)))
+;;         (debug (map vals (vals (:pose pose))))
+;;         (Thread/sleep 1000)
+;;         (recur particles'
+;;                (:transform (get-transform tf "odom" "base_footprint"))
+;;                curr-odom)))))
+
 
 ;; reset the node
 
-(comment
+;; (comment
 
-  (when-not (nil? amcl)
-    (stop amcl)
-    (Thread/sleep 1000)
-    (def amcl nil))
-  
-  
-  (def amcl (make-amcl-node))
+;;   (when-not (nil? amcl)
+;;     (stop amcl)
+;;     (Thread/sleep 1000)
+;;     (def amcl nil))
 
 
-  #_(defn -main []
-      (wait-for-map)
-      (let [amcl (make-amcl-node)
-            num-particles 100]
-        (go
-          (loop [particles (uniform-initialization @*map* num-particles)
-                 laser-scan (<! scan)
-                 last-tf nil
-                 curr-tf (<! tf)]
-            (when (running? amcl)
-              (let [control (calculate-control last-tf curr-tf)
-                    particles' (mcl laser-scan control @*map*)
-                    pose (pose-estimate particles)
-                    current-time (-> laser-scan :header :stamp)
-                    tf' (update-tf pose tf current-time)]
-                (publish amcl "/particlecloud" particles')
-                (publish amcl "/amcl_pose" pose)
-                (publish amcl "/tf" tf')
-                (recur particles' (<! scan) curr-tf (<! tf))))))))
-  
-
-  (defn publish-loop [times]
-    (wait-for-map)
-    (go (loop [times times]
-          (when-not (zero? times)
-            (let [scan' (<! scan)]
-              (println "Received data...publishing response" times)
-              (publish amcl "/amcl_pose" (new-message amcl "/amcl_pose"))
-              (publish amcl "/paticlecloud" (new-message amcl "/paticlecloud"))
-              (recur (dec times)))))))
+;;   (defn publish-loop [times]
+;;     (wait-for-map)
+;;     (go (loop [times times]
+;;           (when-not (zero? times)
+;;             (let [scan' (<! scan)]
+;;               (println "Received data...publishing response" times)
+;;               (publish amcl "/amcl_pose" (new-message amcl "/amcl_pose"))
+;;               (publish amcl "/paticlecloud" (new-message amcl "/paticlecloud"))
+;;               (recur (dec times)))))))
 
 
 
-  (def simple-node (-> (rosnode "basic")
-                       start sleepy-identity
-                       (subscribe "/chatter" std_msgs.String  #(println %))
-                       (add-publisher "/chatter" std_msgs.String)
-                       (subscribe "/pose" geometry_msgs.Pose #(println %))
-                       (add-publisher "/pose" geometry_msgs.Pose)))
+;;   (def simple-node (-> (rosnode "basic")
+;;                        start sleepy-identity
+;;                        (subscribe "/chatter" std_msgs.String  #(println %))
+;;                        (add-publisher "/chatter" std_msgs.String)
+;;                        (subscribe "/pose" geometry_msgs.Pose #(println %))
+;;                        (add-publisher "/pose" geometry_msgs.Pose)))
 
 
-  )
+;;   )
+
+;; (defn publish-gaussian-cloud [node]
+;;   (when (running? node)
+;;     (loop [particles nil, prev-odom nil]
+;;       (if-let [pose @*pose*]
+;;         ;; we have pose, so initialize new cloud there
+;;         (let [particles (geometry-msgs/pose-array
+;;                          :header (std-msgs/header :frameId "map")
+;;                          :poses (repeatedly 100 #(gaussian-noise (-> pose :pose :pose) [0 0.1] [0 0.01])))]
+;;           (reset! *pose* nil)
+;;           (recur particles prev-odom))
+;;         ;; updating based on odom
+;;         (if (not (nil? particles))
+;;           (let [odometry (:transform (get-transform tf "odom" "base_footprint"))
+;;                 _ (debug "Odomdetry calculated")
+;;                 control (calculate-control odometry prev-odom)
+;;                 _ (debug "Control calculated")
+;;                 particles' (odom-update control particles)
+;;                 _ (debug "Prediction applied")
+;;                 est-pose (geometry-msgs/pose-stamped :header (std-msgs/header :frameId "map")
+;;                                                      :pose (pose-estimate (:poses particles')))
+;;                 _ (debug "Pose estimated")
+;;                 tf' (update-tf (:pose est-pose) tf nil)
+;;                 _ (debug "New TF created")]
+;;             (publish node "/tf" tf')
+;;             (publish node "/particlecloud" particles')
+;;             (publish node "/pose2" est-pose)
+;;             (recur particles' odometry))
+;;           (recur nil nil))))))
 
 
-
-(defn publish-silly-cloud [node]
-  (when (running? node)
-    (when-let [pose @*pose*]
-      (let [fake-cloud (geometry-msgs/pose-array
-                        :header (std-msgs/header :frameId "base_link")
-                        :poses (repeatedly 1000 #_(-> pose :pose :pose)
-                                           #(amclj.pf/gaussian-noise (-> pose :pose :pose) [0 0.5] [0 0.01])))
-            fake-pose (geometry-msgs/pose-stamped
-                       :header (std-msgs/header :frameId "base_link")
-                       :pose (pose-estimate (:poses fake-cloud)))
-            ;;new-tf (update-tf )
-            ]
-        (publish node "/particlecloud" fake-cloud)
-        (publish node "/pose2" fake-pose)))))
-
-
-;; Potentiall an error (not sure if it looks odd because there is no transform with the map frame
-(defn publish-uniform-cloud [node] 
-  (when (running? node)
-    (let [uniform-cloud (geometry-msgs/pose-array
-                          :header (std-msgs/header :frameId "base_link")
-                          :poses (uniform-initialization @*map* 5000))
-          pose (geometry-msgs/pose-stamped
-                :header (std-msgs/header :frameId "base_link")
-                :pose (pose-estimate (:poses uniform-cloud)))]
-
-      (publish node "/particlecloud" uniform-cloud)
-      (publish node "/pose2" pose))))
+;; ;; Potentiall an error (not sure if it looks odd because there is no transform with the map frame
+;; (defn publish-uniform-cloud [node] 
+;;   (when (running? node)
+;;     (let [uniform-cloud (geometry-msgs/pose-array
+;;                          :header (std-msgs/header :frameId "map")
+;;                          :poses (uniform-initialization @*map* 5000))
+;;           pose (geometry-msgs/pose-stamped
+;;                 :header (std-msgs/header :frameId "map")
+;;                 :pose (pose-estimate (:poses uniform-cloud)))
+;;           new-tf (update-tf (:pose pose) tf nil)]
+;;       (publish node "/particlecloud" uniform-cloud)
+;;       (publish node "/pose2" pose)
+;;       (publish node "/tf" new-tf))))
 
 
 ;; This code repeatedly publishes transforms.
 ;;
-;; (repeatedly 500 #(do (publish amcl "/tf" (amclj.pf/update-tf (geometry-msgs/pose-with-covariance-stamped
-;;                                  :pose-cov (geometry-msgs/pose-with-covariance
-;;                                             :pose (geometry-msgs/pose
-;;                                                    :position (geometry-msgs/vector3 :x 16.5 :y 16.18)
-;;                                                    :orientation (geometry-msgs/quaternion :z 0.97 :w 0.23))))
-;;                                                                         tf nil))
-;;                                 (Thread/sleep 100)))
+;; (repeatedly 500 #(do (publish amcl "/tf" (amclj.pf/update-tf (geometry-msgs/pose
+;;                                                               :position (geometry-msgs/vector3 :x 16.5 :y 16.18)
+;;                                                               :orientation (geometry-msgs/quaternion :z 0.97 :w 0.23))
+;;                                                              tf nil))
+;;                      (Thread/sleep 100)))
+
