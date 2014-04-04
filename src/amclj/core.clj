@@ -4,11 +4,13 @@
             [std-msgs]
             [amclj.ros :refer :all]
             [amclj.pf :refer :all]
+            [amclj.quaternions :as quat]
             [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer alts!! timeout]]
             [clojure.core.async :as async]
             [clojure.reflect :as reflect]
             [incanter.stats :as stats]
             [taoensso.timbre :as timbre]))
+
 
 (timbre/refer-timbre)
 
@@ -17,11 +19,11 @@
   [x]
   (Thread/sleep 2000) x)
 
-;;(def ^:dynamic *map* (atom nil))
-;;(def ^:dynamic *pose* (atom nil))
+(def ^:dynamic *map* (atom nil))
+(def ^:dynamic *pose* (atom nil))
 (def laser-ch (chan (sliding-buffer 1)))
 (def tf-ch (chan (sliding-buffer 1)))
-(def odom (chan (sliding-buffer 1)))
+(def odom-ch (chan (sliding-buffer 1)))
 
 (defn make-amcl-node []
   (let [node (start (rosnode "amcl"))]
@@ -31,7 +33,7 @@
           ;; Subscriptions
           (subscribe "/scan" sensor_msgs.LaserScan #(go (>! laser-ch %)))
           (subscribe  "/tf" tf2_msgs.TFMessage #(go (>! tf-ch %)))
-          #_(subscribe  "/odom" nav_msgs.Odometry #(go (>! odom %)))
+          (subscribe  "/odom" nav_msgs.Odometry #(go (>! odom-ch %)))
           (subscribe "/initialpose" geometry_msgs.PoseWithCovarianceStamped #(do (debug "Received pose") (reset! *pose* %)))
           (subscribe "/map" nav_msgs.OccupancyGrid #(do (debug "Received map") (reset! *map* %)))
           ;; Publications
@@ -50,7 +52,7 @@
     (Thread/sleep 1000)
     (recur)))
 
-(defn -main []
+#_(defn -main []
   (info "Starting node")
   (let [;;amcl (make-amcl-node)
         mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
@@ -171,7 +173,7 @@
 ;;                      (Thread/sleep 100)))
 
 
-(defn test-apply-motion-model [amcl-node]
+#_(defn test-apply-motion-model [amcl-node]
   (let [init (geometry-msgs/pose-array
               :header (std-msgs/header :frameId "map")
               :poses [(geometry-msgs/pose
@@ -181,7 +183,7 @@
         (loop [particles init]
           (let [control (geometry-msgs/transform
                          :translation (geometry-msgs/vector3 :x 0)
-                         :rotation (heading->quat (- (/ Math/PI 8))))
+                         :rotation (quat/from-heading (- (/ Math/PI 8))))
                 updated-particles (apply-motion-model control particles)
                 pose-stamped (assoc (pose-estimate (:poses updated-particles))
                                :header (std-msgs/header :frameId "map"))

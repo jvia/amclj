@@ -26,47 +26,7 @@
    :use_map_topic false
    :first_map_only false})
 
-(def odom
-  "Odometry Options:
-    :odom_model_type (default :diff) Which model to use, either :diff
-                     or :omni.
-  
-    :odom_alpha1 (default 0.2) Specifies the expected noise in
-                 odometry's rotation estimate from the rotational
-                 component of the robot's motion.
-  
-    :odom_alpha2 (default 0.2) Specifies the expected noise in
-                 odometry's rotation estimate from translational
-                 component of the robot's motion.
-  
-    :odom_alpha3 (default 0.2) Specifies the expected noise in
-                 odometry's translation estimate from the translational
-                 component of the robot's motion.
-  
-    :odom_alpha4 (default 0.2) Specifies the expected noise in
-                 odometry's translation estimate from the rotational
-                 component of the robot's motion.
-  
-    :odom_alpha5 (default 0.2) Translation-related noise parameter (only
-                 used if model is :omni).
-  
-    :odom_frame_id (default \"odom\") Which frame to use for odometry.
-  
-    :base_frame_id (default \"base_link\") Which frame to use for the
-                   robot base
-  
-    :global_frame_id (default \"map\") The name of the
-                     coordinate frame published by the localization
-                     system"
-  {:odom_model_type :diff
-   :odom_alpha1 0.2
-   :odom_alpha2 0.2
-   :odom_alpha3 0.2
-   :odom_alpha4 0.2
-   :odom_alpha5 0.2
-   :odom_frame_id "odom"
-   :base_frame_id "base_link"
-   :global_frame_id "map"})
+
 
 (def laser
   {:laser_min_range -1.0

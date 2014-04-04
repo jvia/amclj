@@ -5,84 +5,10 @@
             [incanter.core :refer :all]
             [incanter.stats :as stats]
             [clojure.core.async :refer [<!! <! >! >!! go go-loop chan]]
-            [taoensso.timbre :as log]))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Quaternions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defn mult-quaternion
-  "Multiply two quaternions together."
-  [qa qb]
-  (let [qaw (:w qa) qax (:x qa) qay (:y qa) qaz (:z qa)
-        qbw (:w qb) qbx (:x qb) qby (:y qb) qbz (:z qb)]
-    (geometry-msgs/quaternion
-     :x (+ (* qax qbw) (* qaw qbx) (* qay qbz) (- (* qaz qby)))
-     :y (+ (* qaw qby) (- (* qax qbz)) (* qay qbw) (* qaz qbx)) 
-     :z (+ (* qaw qbz) (* qax qby) (- (* qay qbx)) (* qaz qbw))
-     :w (- (* qaw qbw) (* qax qbx) (* qay qby) (* qaz qbz)))))
+            [taoensso.timbre :as log]
+            [amclj.quaternions :as quat]))
 
 
-(defn rotate-quaternion
-  "Roatate a quaternion about some heading."
-  [quat heading]
-  (let [pitch 0 bank 0
-        c1 (Math/cos (/ heading 2))
-        s1 (Math/sin (/ heading 2))
-        c2 (Math/cos (/ pitch 2))
-        s2 (Math/sin (/ pitch 2))
-        c3 (Math/cos (/ bank 2))
-        s3 (Math/sin (/ bank 2))
-        c1c2 (* c1 c2)
-        s1s2 (* s1 s2)]
-    (mult-quaternion
-     (geometry-msgs/quaternion
-      :w (- (* c1c2 c3) (* s1s2 s3))
-      :x (+ (* c1c2 s3) (* s1s2 c3))
-      :y (- (* c1 s2 c3) (* s1 c2 s3))
-      :z (+ (* s1 c2 c3) (* c1 s2 s3)))
-     quat)))
-
-
-(defn create-quaternion
-  "Cretate a unit quaternion."
-  []
-  (let [heading 0 pitch 0 bank 0
-        c1 (Math/cos (/ heading 2))
-        s1 (Math/sin (/ heading 2))
-        c2 (Math/cos (/ pitch 2))
-        s2 (Math/sin (/ pitch 2))
-        c3 (Math/cos (/ bank 2))
-        s3 (Math/sin (/ bank 2))
-        c1c2 (* c1 c2)
-        s1s2 (* s1 s2)]
-    (geometry-msgs/quaternion
-     :w (- (* c1c2 c3) (* s1s2 s3))
-     :x (+ (* c1c2 s3) (* s1s2 c3))
-     :y (+ (* s1 c2 c3) (* c1 s2 s3))
-     :z (- (* c1 s2 c3) (* s1 c2 s3)))))
-
-(defn heading->quat
-  "Given a heading (yaw) in radians, convert it to a quaternion."
-  [heading]
-  (let [initial (geometry-msgs/quaternion)]
-    (rotate-quaternion initial heading)))
-
-(defn quat->heading
-  "Given a quaternion, return the heading (yaw) in radians."
-  [quat]
-  (let [qx (-> quat :x)
-        qy (-> quat :y)
-        qz (-> quat :z)
-        qw (-> quat :w)
-        test (+ (* qx qy) (* qz qw))]
-    (cond
-     ;; singularity as north pole
-     (> test 0.4999) (* 2  (Math/atan2 qx qw))
-     ;; singularity at south pole
-     (< test -0.499) (* -2 (Math/atan2 qx qw))
-     :else
-     #_(Math/atan2   (- (* 2 qy qw) (* 2 qx qz)) (- 1 (* 2 qy qy) (* 2 qz qz)))
-     (Math/atan2 (- (* 2 qz qw) (* 2 qx qy)) (- 1 (* 2 qz qz) (* 2 qy qy))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -119,8 +45,8 @@
            [y] (stats/sample-uniform 1 :min min-y :max max-y)]
        (geometry-msgs/pose 
         :position (geometry-msgs/point :x x :y y)
-        :orientation (rotate-quaternion (geometry-msgs/quaternion :x 0 :y 0 :z 0 :w 1)
-                                        (stats/sample-normal 1))))))
+        :orientation (quat/rotate (geometry-msgs/quaternion :x 0 :y 0 :z 0 :w 1)
+                                  (stats/sample-normal 1))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -202,7 +128,7 @@
   "Estimate the pose from the particle cloud."
   [particles]
   (let [raw-estimate (apply add-pose particles)
-        raw-heading (reduce + (map (comp quat->heading :orientation) particles))
+        raw-heading (reduce + (map (comp quat/to-heading :orientation) particles))
         normalizer (count particles)]
     (geometry-msgs/pose-stamped
      :pose
@@ -292,13 +218,13 @@
      :position (geometry-msgs/point :x (+ x (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
                                     :y (+ y (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
                                     :z 0)
-     :orientation (rotate-quaternion (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
+     :orientation (quat/rotate (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
 
 
 (defn sample-motion-model [control particle]
   (let [diff-x (max 0.0001 (-> control :translation :x))
         diff-y (max 0.0001 (-> control :translation :y))
-        diff-heading (max 0.05 (quat->heading (-> control :rotation)))]
+        diff-heading (max 0.05 (quat/to-heading (-> control :rotation)))]
     (log/debug diff-x diff-y diff-heading)
     (-> particle
         (update-in [:position :x]
@@ -306,7 +232,7 @@
         (update-in [:position :x]
                    #(+ % (* diff-y (+ 1 (stats/sample-normal 1 :mean 0 :sd 0.01)))))
         (update-in [:orientation]
-                   #(rotate-quaternion % (+ diff-heading (* diff-heading (stats/sample-normal 1 :mean 0 :sd 0.01))))))))
+                   #(quat/rotate % (+ diff-heading (* diff-heading (stats/sample-normal 1 :mean 0 :sd 0.01))))))))
 
 (defn odom-update [control particles]
   (assoc particles :poses
