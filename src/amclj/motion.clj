@@ -124,7 +124,6 @@
   ([pose control-vec]
      (sample-motion-model-odometry pose (first control-vec) (second control-vec)))
   ([pose curr-odom prev-odom]
-     (sample-motion-model-odometry*
-      pose
-      (-> curr-odom :pose :pose)
-      (-> prev-odom :pose :pose))))
+     (sample-motion-model-odometry* pose
+                                    (-> curr-odom :pose :pose)
+                                    (-> prev-odom :pose :pose))))
