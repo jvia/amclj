@@ -6,72 +6,9 @@
             [incanter.stats :as stats]
             [clojure.core.async :refer [<!! <! >! >!! go go-loop chan]]
             [taoensso.timbre :as log]
-            [amclj.quaternions :as quat]))
+            [amclj.quaternions :as quat]
+            [amclj.map :refer [uniform-initialization gaussian-initialization]]))
 
-
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; OccupancyGrid
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-(defn inhabitable?
-  "Can a robot occupy the given location in the map?"
-  [map pose]
-  (let [x (int (-> pose :position :x))
-        y (int (-> pose :position :y))]
-    (zero? (sel (-> map :data) x y))))
-
-(defn map->world
-  "Convert from map index into world coordinates."
-  [map pose]
-  (-> pose
-      (update-in [:position :x] #(* % (-> map :info :resolution)))
-      (update-in [:position :y] #(* % (-> map :info :resolution)))))
-
-(defn world->map
-  "Convert from world coordinates to map coorindates"
-  [map pose]
-  (-> pose
-      (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
-      (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution))))))
-
-(defn random-pose
-  "Create a pose uniformly sampled from the grid defined by a map."
-  ([width height] (random-pose 0 width 0 height))
-  ([min-x max-x min-y max-y]
-     (let [[x] (stats/sample-uniform 1 :min min-x :max max-x)
-           [y] (stats/sample-uniform 1 :min min-y :max max-y)]
-       (geometry-msgs/pose 
-        :position (geometry-msgs/point :x x :y y)
-        :orientation (quat/rotate (geometry-msgs/quaternion :x 0 :y 0 :z 0 :w 1)
-                                  (stats/sample-normal 1))))))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Particle Filter
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn uniform-initialization
-  "Uniform create particles across the map"
-  [map num-particles]
-  (log/trace  (type map) (str num-particles ": " (type num-particles)))
-  (let [min-x 0, max-x (-> map :info :width)
-        min-y 0, max-y (-> map :info :height)]
-    (loop [particles []]
-      (if (= num-particles (count particles))
-        (do (log/trace "Returning" (count particles) "particles")
-            particles)
-        (let [proposal (random-pose min-x max-x min-y max-y)]
-          (if (inhabitable? map proposal)
-            (recur (conj particles (map->world map proposal)))
-            (recur particles)))))))
-
-(defn gaussian-initialization [map num-particles pose]
-  ;; Assumes a geometry_msgs.PoseWithCovarianceStamped
-  (repeatedly num-particles
-              #(gaussian-noise (-> pose :pose :pose) [0 0.1] [0 0.01])))
 
 
 (defn initialize-pf
@@ -200,25 +137,7 @@
                                 :z (- (-> pose :orientation :z) (-> odom-tf :rotation :z)))))]
     (tf2-msgs/tf :transforms [transform])))
 
-(defn gaussian-noise
-  "Apply noise to a geometry_msgs.Pose object. Noises should be
-  two-element vectors of [mean sd]."
-  [pose trans-noise rotation-noise]
-  (assert (and (vector? trans-noise) (vector? rotation-noise)) "Noises must be vectors of [mean sd]")
-  (let [x  (-> pose :position :x)
-        y  (-> pose :position :y)
-        z  (-> pose :position :z)
-        rx (-> pose :orientation :x)
-        ry (-> pose :orientation :y)
-        rz (-> pose :orientation :z)
-        rw (-> pose :orientation :w)
-        [trans-mean trans-sd] trans-noise
-        [rot-mean rot-sd] rotation-noise]
-    (geometry-msgs/pose
-     :position (geometry-msgs/point :x (+ x (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
-                                    :y (+ y (stats/sample-normal 1 :mean trans-mean :sd trans-sd))
-                                    :z 0)
-     :orientation (quat/rotate (-> pose :orientation) (stats/sample-normal 1 :mean rot-mean :sd rot-mean)))))
+
 
 
 (defn sample-motion-model [control particle]

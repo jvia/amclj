@@ -9,7 +9,8 @@
             [clojure.core.async :as async]
             [clojure.reflect :as reflect]
             [incanter.stats :as stats]
-            [taoensso.timbre :as timbre]))
+            [taoensso.timbre :as timbre]
+            [amclj.map :as map]))
 
 
 (timbre/refer-timbre)
@@ -53,19 +54,19 @@
     (recur)))
 
 #_(defn -main []
-  (info "Starting node")
-  (let [;;amcl (make-amcl-node)
-        mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
-    (debug "Results channel created.")
-    (loop []
-      (let [[particles pose tf] (<!! mcl-ch)]
-        (debug (str "Recieved data: ["
-                    (type particles) ", " (type pose) ", " (type tf) "]"))
-        (publish amcl "/particlecloud" particles)
-        (publish amcl "/tf" tf)
-        (publish amcl "/pose2" pose)
-        (debug "Published data")
-        (recur)))))
+    (info "Starting node")
+    (let [;;amcl (make-amcl-node)
+          mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
+      (debug "Results channel created.")
+      (loop []
+        (let [[particles pose tf] (<!! mcl-ch)]
+          (debug (str "Recieved data: ["
+                      (type particles) ", " (type pose) ", " (type tf) "]"))
+          (publish amcl "/particlecloud" particles)
+          (publish amcl "/tf" tf)
+          (publish amcl "/pose2" pose)
+          (debug "Published data")
+          (recur)))))
 
 ;; (defn odom-printer []
 ;;   (when-let [pose @*pose*]
@@ -150,18 +151,17 @@
 
 
 ;; ;; Potentiall an error (not sure if it looks odd because there is no transform with the map frame
-;; (defn publish-uniform-cloud [node] 
-;;   (when (running? node)
-;;     (let [uniform-cloud (geometry-msgs/pose-array
-;;                          :header (std-msgs/header :frameId "map")
-;;                          :poses (uniform-initialization @*map* 5000))
-;;           pose (geometry-msgs/pose-stamped
-;;                 :header (std-msgs/header :frameId "map")
-;;                 :pose (pose-estimate (:poses uniform-cloud)))
-;;           new-tf (update-tf (:pose pose) tf nil)]
-;;       (publish node "/particlecloud" uniform-cloud)
-;;       (publish node "/pose2" pose)
-;;       (publish node "/tf" new-tf))))
+(defn publish-uniform-cloud [node]
+  (try
+    (when (running? node)
+      (let [uniform-cloud (geometry-msgs/pose-array
+                           :header (std-msgs/header :frameId "map")
+                           :poses (map/uniform-initialization @*map* 200))
+            _ (debug "Cloud created")
+            new-tf (update-tf (geometry-msgs/pose) tf-ch)]
+        (publish node "/particlecloud" uniform-cloud)
+        (publish node "/tf" new-tf)))
+    (catch Exception e (error e))))
 
 
 ;; This code repeatedly publishes transforms.
@@ -174,24 +174,38 @@
 
 
 #_(defn test-apply-motion-model [amcl-node]
-  (let [init (geometry-msgs/pose-array
-              :header (std-msgs/header :frameId "map")
-              :poses [(geometry-msgs/pose
-                       :position (geometry-msgs/point :x 16 :y 16))])]
-    (with-log-level :trace
-      (try
-        (loop [particles init]
-          (let [control (geometry-msgs/transform
-                         :translation (geometry-msgs/vector3 :x 0)
-                         :rotation (quat/from-heading (- (/ Math/PI 8))))
-                updated-particles (apply-motion-model control particles)
-                pose-stamped (assoc (pose-estimate (:poses updated-particles))
-                               :header (std-msgs/header :frameId "map"))
-                tf   (update-tf (:pose pose-stamped) tf-ch)]
-            (debug (map vals (vals (:pose pose-stamped))))
-            (publish amcl "/particlecloud" updated-particles)
-            (publish amcl "/pose2" pose-stamped)
-            (publish amcl "/tf" tf)
-            (Thread/sleep 1000)
-            (recur updated-particles)))
-        (catch Exception e (error e))))))
+    (let [init (geometry-msgs/pose-array
+                :header (std-msgs/header :frameId "map")
+                :poses [(geometry-msgs/pose
+                         :position (geometry-msgs/point :x 16 :y 16))])]
+      (with-log-level :trace
+        (try
+          (loop [particles init]
+            (let [control (geometry-msgs/transform
+                           :translation (geometry-msgs/vector3 :x 0)
+                           :rotation (quat/from-heading (- (/ Math/PI 8))))
+                  updated-particles (apply-motion-model control particles)
+                  pose-stamped (assoc (pose-estimate (:poses updated-particles))
+                                 :header (std-msgs/header :frameId "map"))
+                  tf   (update-tf (:pose pose-stamped) tf-ch)]
+              (debug (map vals (vals (:pose pose-stamped))))
+              (publish amcl "/particlecloud" updated-particles)
+              (publish amcl "/pose2" pose-stamped)
+              (publish amcl "/tf" tf)
+              (Thread/sleep 1000)
+              (recur updated-particles)))
+          (catch Exception e (error e))))))
+
+
+(defn publish-all-possible-poses [amcl]
+  (with-log-level :trace
+    (try
+      (let [particles (geometry-msgs/pose-array
+                       :header (std-msgs/header :frameId "map")
+                       :poses (map/saturate-map @*map*))
+            _ (debug "Created " (count (:poses particles)) " particles")
+            tf   (update-tf (geometry-msgs/pose) tf-ch)]
+        (debug "Particles: " (count (:poses particles)))
+        (publish amcl "/particlecloud" particles)
+        (publish amcl "/tf" tf))
+      (catch Exception e (error e)))))

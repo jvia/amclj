@@ -1,5 +1,5 @@
 (ns std-msgs
-  (:refer-clojure :exclude [java.lang.String])
+  (:refer-clojure :exclude [time])
   (:require [rosclj.msg :refer :all]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
