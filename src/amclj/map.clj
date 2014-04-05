@@ -17,15 +17,9 @@
   [map x y]
   (incanter.core/sel (:data map) y x))
 
-(defn inhabitable?
-  "Can a robot occupy the given location in the map?"
-  ([map x y]
-     (zero? (get-cell map x y)))
-  ([map pose]
-     (inhabitable? map
-                   (int (-> pose :position :x))
-                   (int (-> pose :position :y)))))
-
+(defn occupied? [map [x y]]
+  (log/debug "X:" x "Y:" y)
+  (> (get-cell map x y) 0))
 
 (defn map->world
   "Convert from map index into world coordinates."
@@ -40,6 +34,15 @@
   (-> pose
       (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
       (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution))))))
+
+(defn inhabitable?
+  "Can a robot occupy the given location in the map?"
+  ([map x y]
+     (zero? (get-cell map x y)))
+  ([map pose]
+     (inhabitable? map
+                   (int (-> pose :position :x))
+                   (int (-> pose :position :y)))))
 
 (defn random-pose
   "Create a pose uniformly sampled from the grid defined by a map."
@@ -104,4 +107,4 @@
           y (range height)
           :when (and (even? x) (even? y)
                      (inhabitable? map x y))]
-      (pose :position (point :x x :y y)))))
+      (map->world map (pose :position (point :x x :y y))))))
