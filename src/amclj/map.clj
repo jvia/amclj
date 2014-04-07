@@ -17,23 +17,27 @@
   [map x y]
   (incanter.core/sel (:data map) y x))
 
-(defn occupied? [map [x y]]
-  (log/debug "X:" x "Y:" y)
+(defn occupied? [map x y]
   (> (get-cell map x y) 0))
 
 (defn map->world
   "Convert from map index into world coordinates."
-  [map pose]
-  (-> pose
-      (update-in [:position :x] #(* % (-> map :info :resolution)))
-      (update-in [:position :y] #(* % (-> map :info :resolution)))))
+  ([map pose]
+     (-> pose
+         (update-in [:position :x] #(* % (-> map :info :resolution)))
+         (update-in [:position :y] #(* % (-> map :info :resolution))))))
 
 (defn world->map
   "Convert from world coordinates to map coorindates"
   [map pose]
-  (-> pose
-      (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
-      (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution))))))
+  (if (vector? pose)
+    (let [[x y] pose]
+      [(Math/round (/ x (-> map :info :resolution)))
+       (Math/round (/ y (-> map :info :resolution)))])
+    ;; assume pose
+    (-> pose
+        (update-in [:position :x] #(Math/round (/ % (-> map :info :resolution))))
+        (update-in [:position :y] #(Math/round (/ % (-> map :info :resolution)))))))
 
 (defn inhabitable?
   "Can a robot occupy the given location in the map?"

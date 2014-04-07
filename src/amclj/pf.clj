@@ -81,13 +81,6 @@
                     :w (/ (get-in raw-estimate [:orientation :w]) normalizer))))))
 
 
-(defn beam-range-finder-model [])
-(defn likelihood-field-range-finder-model [])
-
-
-(defn measurement-model [measurement particle map])
-
-
 (defn calculate-control
   "Given a channel of TF data, find an odom to base_footprint
   transform as the control."
