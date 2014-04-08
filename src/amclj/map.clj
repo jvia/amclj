@@ -48,6 +48,8 @@
                    (int (-> pose :position :x))
                    (int (-> pose :position :y)))))
 
+(def uninhabitable? (comp not inhabitable?))
+
 (defn random-pose
   "Create a pose uniformly sampled from the grid defined by a map."
   ([width height] (random-pose 0 width 0 height))

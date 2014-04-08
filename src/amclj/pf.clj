@@ -1,15 +1,17 @@
 (ns amclj.pf
   (:require [geometry-msgs :refer :all]
             [nav-msgs :refer :all]
-            [amclj.model :as model]
+            [tf2-msgs]
             [incanter.core :refer :all]
             [incanter.stats :as stats]
             [clojure.core.async :refer [<!! <! >! >!! go go-loop chan]]
             [taoensso.timbre :as log]
             [amclj.quaternions :as quat]
-            [amclj.map :refer [uniform-initialization gaussian-initialization]]))
+            [amclj.map :refer [uniform-initialization gaussian-initialization]]
+            [amclj.motion :refer  [sample-motion-model-odometry]]
+            [amclj.sensor :refer [likelihood-field-range-finder-model]]))
 
-
+(def num-particles 10)
 
 (defn initialize-pf
   "Initialize a particle filter based on a map and optionally on a
@@ -22,10 +24,8 @@
   (geometry-msgs/pose-array
    :header (std-msgs/header :frameId "map")
    :poses (if (nil? pose)
-            (do (log/debug "Uniform initialization")
-                (uniform-initialization map num-particles))
-            (do (log/debug "Gaussian initialization")
-                (gaussian-initialization map num-particles pose)))))
+            (uniform-initialization map num-particles)
+            (gaussian-initialization map num-particles pose))))
 
 (defn add-pose
   "Add a number poses together"
@@ -132,73 +132,59 @@
 
 
 
-
-(defn sample-motion-model [control particle]
-  (let [diff-x (max 0.0001 (-> control :translation :x))
-        diff-y (max 0.0001 (-> control :translation :y))
-        diff-heading (max 0.05 (quat/to-heading (-> control :rotation)))]
-    (log/debug diff-x diff-y diff-heading)
-    (-> particle
-        (update-in [:position :x]
-                   #(+ % (* diff-x (+ 1 (stats/sample-normal 1 :mean 0 :sd 0.01)))))
-        (update-in [:position :x]
-                   #(+ % (* diff-y (+ 1 (stats/sample-normal 1 :mean 0 :sd 0.01)))))
-        (update-in [:orientation]
-                   #(quat/rotate % (+ diff-heading (* diff-heading (stats/sample-normal 1 :mean 0 :sd 0.01))))))))
-
-(defn odom-update [control particles]
-  (assoc particles :poses
-         (for [particle (:poses particles)]
-           (sample-motion-model control particle))))
-
 ;; TODO
 (defn apply-motion-model
   "Updates the particle cloud based on the control (and implicitly the
   motion model)"
   [control particles]
-  (assoc particles :poses
-         (for [particle (:poses particles)]
-           (sample-motion-model control particle))))
+  (assoc particles
+    :poses (for [particle (:poses particles)]
+             (sample-motion-model-odometry particle control))))
 
 ;; TODO
 (defn apply-sensor-model
   "Returns a set of weighted paticles based on the scan the measurement model."
-  [scan particles map]
-  (throw (UnsupportedOperationException.)))
+  [scan map particles]
+  (assoc particles
+    :poses (for [particle (:poses particles)]
+             (likelihood-field-range-finder-model
+              scan particle map))))
 
-;; TODO
-(defn weighted-sample
-  "Sample count many particles to propagate to the next generation."
-  [count weighted-particles]
-  (throw (UnsupportedOperationException.)))
+(defn tournament-selection [particles]
+  particles)
 
+(defn init-and-reset [map-atom pose-atom]
+  (let [particles (initialize-pf @map-atom num-particles :pose @pose-atom)]
+    (reset! pose-atom nil)
+    particles))
 
-(defn mcl* [tf-ch laser-ch pose-atom map-atom result-ch]
+(defn log-odom [curr-odom prev-odom]
+  (let [ax (-> curr-odom :pose :pose :position :x)
+        ay (-> curr-odom :pose :pose :position :y)
+        ao (-> curr-odom :pose :pose :orientation quat/to-heading)
+        bx (-> prev-odom :pose :pose :position :x)
+        by (-> prev-odom :pose :pose :position :y)
+        bo (-> prev-odom :pose :pose :orientation quat/to-heading)]
+    (log/debug "curr: " [ax ay ao] "; prev: " [bx by bo])))
+
+(defn mcl* [tf-ch laser-ch odom-ch pose-atom map-atom result-ch]
   (try
-    (let [part-init (initialize-pf @map-atom 4 :pose @pose-atom)]
+    (let [part-init (initialize-pf @map-atom num-particles :pose @pose-atom)]
       ;; clear it out when we're done
       (reset! pose-atom nil)
       (loop [particles part-init
-             prev-transform (geometry-msgs/transform)]
-        (let [particles' (if (nil? @pose-atom) particles
-                             (let [p (initialize-pf @map-atom 4 :pose @pose-atom)]
-                               (reset! pose-atom nil) p))
-              curr-transform (get-transform tf-ch "odom" "base_footprint")
-              control (calculate-control  curr-transform prev-transform)
-              _ (log/trace "Control:" (map vals (vals control)))
-              particles'' (apply-motion-model control particles')
-              ;;weight-particles (apply-sensor-model (<!! laser-ch) particles'' @map)
-              ;;particles''' (weighted-sampled weight-particles)
-              particles''' particles''
-              pose-stamped (assoc (pose-estimate (:poses particles'''))
-                             :header (std-msgs/header :frameId "map"))
-
+             prev-odom (nav-msgs/odometry)]
+        (let [particles'(if (nil? @pose-atom) particles (init-and-reset map-atom pose-atom))
+              curr-odom (<!! odom-ch)
+              particles'' (->> particles'
+                               (apply-motion-model [curr-odom prev-odom])
+                               (apply-sensor-model (<!! laser-ch) @map-atom)
+                               tournament-selection)
+              pose-stamped (assoc (pose-estimate (:poses particles'')) :header (std-msgs/header :frameId "map"))
               tf   (update-tf (:pose pose-stamped) tf-ch)]
-          (log/trace "estimate(p2) == estimate(p3): " (= (pose-estimate (:poses particles''))
-                                                         (pose-estimate (:poses particles'''))))
-          (when (>!! result-ch [particles''' pose-stamped tf])
-            ;;(log/debug "Result pushed to channel")
-            (recur particles''' curr-transform)))))
+          (log/debug "MCL data calculated")
+          (when (>!! result-ch [particles'' pose-stamped tf])
+            (recur particles'' curr-odom)))))
     (catch Exception e
       (log/error e))))
 
@@ -208,6 +194,7 @@
 Expects:
   - tf-ch: a channel of tf2_msgs.TFMessage data
   - laser-ch: a channel of sensor_msgs.LaserScan data
+  - odom-ch: a channel of nav_msgs.Odometry data
   - pose-atom: an atom potentially containing an initial geometry_msgs.PoseWithCovarianceStamped
   - map-atom: an atom containing the map in the form nav_msgs.OccupancyGrid
 
@@ -215,9 +202,9 @@ Returns:
   - a channel from which [geometry_msgs.PoseArray geometry_msgs.PoseStamped tf2_msgs.TFMessage] 
     data can be pulled and then published to ROS.
 "
-  [tf-ch laser-ch pose-atom map-atom]
+  [tf-ch laser-ch odom-ch pose-atom map-atom]
   (let [result-ch (chan)]
-    (go (mcl* tf-ch laser-ch pose-atom map-atom result-ch))
+    (go (mcl* tf-ch laser-ch odom-ch pose-atom map-atom result-ch))
     result-ch))
 
 ;;(defn amcl [particles control measurement map])

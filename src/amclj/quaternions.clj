@@ -1,6 +1,7 @@
 (ns ^{:doc "Utilities for working with quaternions"}
   amclj.quaternions
-  (:require [geometry-msgs :refer [quaternion]]))
+  (:require [geometry-msgs :refer [quaternion]]
+            [taoensso.timbre :as log]))
 
 
 (defn mult

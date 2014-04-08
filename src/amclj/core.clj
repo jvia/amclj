@@ -1,16 +1,17 @@
 (ns amclj.core
-  (:require [sensor-msgs]
-            [tf2-msgs]
-            [std-msgs]
-            [amclj.ros :refer :all]
-            [amclj.pf :refer :all]
-            [amclj.quaternions :as quat]
-            [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer alts!! timeout]]
-            [clojure.core.async :as async]
-            [clojure.reflect :as reflect]
-            [incanter.stats :as stats]
-            [taoensso.timbre :as timbre]
-            [amclj.map :as map]))
+  (:require
+   [std-msgs]
+   [sensor-msgs]
+   [tf2-msgs]
+   [amclj.ros :refer :all]
+   [amclj.pf :refer :all]
+   [amclj.quaternions :as quat]
+   [clojure.core.async :refer [go chan >! <! >!! <!! sliding-buffer alts!! timeout]]
+   [clojure.core.async :as async]
+   [clojure.reflect :as reflect]
+   [incanter.stats :as stats]
+   [taoensso.timbre :as timbre]
+   [amclj.map :as map]))
 
 
 (timbre/refer-timbre)
@@ -20,7 +21,7 @@
   [x]
   (Thread/sleep 2000) x)
 
-(def ^:dynamic *map* (atom nil))
+(def ^:dynamic *map* (if (resolve '*map*) *map* (atom nil)))
 (def ^:dynamic *pose* (atom nil))
 (def laser-ch (chan (sliding-buffer 1)))
 (def tf-ch (chan (sliding-buffer 1)))
@@ -53,20 +54,19 @@
     (Thread/sleep 1000)
     (recur)))
 
-#_(defn -main []
-    (info "Starting node")
-    (let [;;amcl (make-amcl-node)
-          mcl-ch (monte-carlo-localization tf-ch laser-ch *pose* *map*)]
-      (debug "Results channel created.")
-      (loop []
-        (let [[particles pose tf] (<!! mcl-ch)]
-          (debug (str "Recieved data: ["
-                      (type particles) ", " (type pose) ", " (type tf) "]"))
-          (publish amcl "/particlecloud" particles)
-          (publish amcl "/tf" tf)
-          (publish amcl "/pose2" pose)
-          (debug "Published data")
-          (recur)))))
+(defn -main [amcl]
+  (info "Starting node")
+  (let [;;amcl (make-amcl-node)
+        mcl-ch (monte-carlo-localization tf-ch laser-ch odom-ch *pose* *map*)]
+    (debug "Results channel created.")
+    (loop []
+      (let [[particles pose tf] (<!! mcl-ch)]
+        #_(debug (str "Recieved data: [" (type particles) ", " (type pose) ", " (type tf) "]"))
+        (publish amcl "/particlecloud" particles)
+        (publish amcl "/tf" tf)
+        (publish amcl "/pose2" pose)
+        (debug "Published data")
+        (recur)))))
 
 ;; (defn odom-printer []
 ;;   (when-let [pose @*pose*]
