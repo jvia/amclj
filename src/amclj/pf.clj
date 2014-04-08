@@ -167,24 +167,34 @@
         bo (-> prev-odom :pose :pose :orientation quat/to-heading)]
     (log/debug "curr: " [ax ay ao] "; prev: " [bx by bo])))
 
+(defn log-transforms [curr-t prev-t]
+  (let [ax (-> curr-t :translation :x)
+        ay (-> curr-t :translation :y)
+        ao (-> curr-t :rotation quat/to-heading)
+        bx (-> prev-t :translation :x)
+        by (-> prev-t :translation :y)
+        bo (-> prev-t :rotation quat/to-heading)]
+    (log/trace "\n PREV: " [bx by bo] "\n"
+                  "CURR: " [ax ay ao])))
+
 (defn mcl* [tf-ch laser-ch odom-ch pose-atom map-atom result-ch]
   (try
     (let [part-init (initialize-pf @map-atom num-particles :pose @pose-atom)]
       ;; clear it out when we're done
       (reset! pose-atom nil)
-      (loop [particles part-init
-             prev-odom (nav-msgs/odometry)]
+      (loop [particles part-init prev-transform (geometry-msgs/transform)]
         (let [particles'(if (nil? @pose-atom) particles (init-and-reset map-atom pose-atom))
-              curr-odom (<!! odom-ch)
+              curr-transform (get-transform tf-ch "odom" "base_footprint")
+              _ (log-transforms curr-transform prev-transform)
               particles'' (->> particles'
-                               (apply-motion-model [curr-odom prev-odom])
-                               (apply-sensor-model (<!! laser-ch) @map-atom)
+                               (apply-motion-model [curr-transform prev-transform])
+                               #_(apply-sensor-model (<!! laser-ch) @map-atom)
                                tournament-selection)
               pose-stamped (assoc (pose-estimate (:poses particles'')) :header (std-msgs/header :frameId "map"))
               tf   (update-tf (:pose pose-stamped) tf-ch)]
           (log/debug "MCL data calculated")
           (when (>!! result-ch [particles'' pose-stamped tf])
-            (recur particles'' curr-odom)))))
+            (recur particles'' curr-transform)))))
     (catch Exception e
       (log/error e))))
 

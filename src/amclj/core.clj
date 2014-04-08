@@ -54,6 +54,12 @@
     (Thread/sleep 1000)
     (recur)))
 
+#_(reset! *pose*
+        (geometry-msgs/pose-with-covariance-stamped
+         :header (std-msgs/header :frameId "map")
+         :pose (geometry-msgs/pose-with-covariance
+                :pose (geometry-msgs/pose
+                       :position (geometry-msgs/point :x 15 :y 15)))))
 (defn -main [amcl]
   (info "Starting node")
   (let [;;amcl (make-amcl-node)

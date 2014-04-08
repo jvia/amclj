@@ -57,8 +57,29 @@
 (defn from-heading
   "Given a heading (yaw) in radians, convert it to a quaternion."
   [heading]
+  
   (let [initial (quaternion)]
     (rotate initial heading)))
+
+(defn from-rpy [roll pitch yaw]
+  (let [half-yaw  (* 0.5 yaw)
+        half-pich (* 0.5 pitch)
+        half-roll (* 0.5 roll)
+        cosYaw (Math/cos half-yaw)
+        sinYaw (Math/sin half-yaw)
+        cosPitch (Math/cos half-pitch)
+        sinPitch (Math/sin half-pitch)
+        cosRoll (Math/cos half-roll)
+        sinRoll (Math/sin half-roll)]
+    (quaternion
+     :x (- (* sinRoll cosPitch cosYaw) (* cosRoll sinPitch sinYaw))
+     :y (+ (* cosRoll sinPitch cosYaw) (* sinRoll cosPitch sinYaw))
+     :z (- (* cosRoll cosPitch sinYaw) (* sinRoll sinPitch cosYaw))
+     :w )))
+
+;; 00108                          cosRoll * cosPitch * sinYaw - sinRoll * sinPitch * cosYaw, //z
+;; 00109                          cosRoll * cosPitch * cosYaw + sinRoll * sinPitch * sinYaw); //formerly yzx
+
 
 (defn to-heading
   "Given a quaternion, return the heading (yaw) in radians."
