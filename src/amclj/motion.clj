@@ -30,13 +30,11 @@
           ;; recover relative motion parameters from odom
           rot1  (- (Math/atan2 (- y' y) (- x' x)) theta)
           trans (Math/hypot (- x x') (- y y'))
-          _ (log/debug "Translation: " trans)
           rot2  (- theta' theta rot1)
           ;; recover relative motion parameters for previous pose
           rot1*  (- rot1  (sample (+ (* alpha1 (pow rot1 2)) (* alpha2 (pow rot2 2)))))
           trans* (if (zero? trans) 0
                      (- trans (sample (+ (* alpha3 (pow trans 2)) (* alpha4 (pow rot1 2)) (* alpha4 (pow rot2 2))))))
-          _ (log/debug "Translation*: " trans*)
           rot2*  (- rot2  (sample (+ (* alpha1 (pow rot2 2)) (* alpha2 (pow trans 2)))))]
       (-> pose
           (update-in [:position :x]

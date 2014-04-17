@@ -3,15 +3,18 @@
             [nav-msgs :refer :all]
             [tf2-msgs]
             [incanter.core :refer :all]
-            [incanter.stats :as stats]
+            [incanter.stats :as stats :refer [median]]
             [clojure.core.async :refer [<!! <! >! >!! go go-loop chan]]
             [taoensso.timbre :as log]
             [amclj.quaternions :as quat]
-            [amclj.map :refer [uniform-initialization gaussian-initialization]]
+            [amclj.map :refer [uniform-initialization gaussian-initialization random-pose
+                               world->map map->world]]
             [amclj.motion :refer  [sample-motion-model-odometry]]
             [amclj.sensor :refer [likelihood-field-range-finder-model]]))
 
-(def num-particles 10)
+(def num-particles 50)
+(def α-slow 0.01)
+(def α-fast 0.1)
 
 (defn initialize-pf
   "Initialize a particle filter based on a map and optionally on a
@@ -150,8 +153,46 @@
              (likelihood-field-range-finder-model
               scan particle map))))
 
+(defn roulette-selection [particles]
+  (let [poses (:poses particles)
+        max (count poses)
+        normalizer (reduce + (map :weight poses))
+        n-poses (map #(update-in % [:weight] (fn [w] (/ w normalizer))) poses)
+        random-pose #(nth n-poses (first (stats/sample-uniform 1 :min 0 :max (dec max) :integers true)))]
+    (loop [new-poses [], count 0]
+      (if (= count max) (assoc particles :poses new-poses)
+          (let [p (random-pose)]
+            (if (> (:weight p) (Math/random))
+              (recur (conj new-poses p) (inc count))
+              (recur new-poses count)))))))
+
+(defn roulette-step [particles]
+  (let [random-pose
+        #(nth (:poses particles)
+              (first (stats/sample-uniform 1
+                                           :min 0
+                                           :max (dec (count (:poses particles)))
+                                           :integers true)))]
+    (loop []
+      (let [pose (random-pose)]
+        (if (> (:weight pose) (Math/random))
+          pose
+          (recur))))))
+
 (defn tournament-selection [particles]
-  particles)
+  (let [poses (:poses particles)
+        max (count poses)
+        random-pose #(nth poses (first (stats/sample-uniform 1 :min 0 :max (dec max) :integers true)))
+        weight #(or (:weight %) 0)]
+    (loop [poses' [], count 0]
+      (if (= count max) (assoc particles :poses poses')
+          (let [p1 (random-pose)
+                p2 (random-pose)]
+            (log/trace (str "Comparing: "
+                            "\n[" (-> p1 :position :x) ", " (-> p1 :position :y) "; " (:weight p1) "]"
+                            "\n[" (-> p2 :position :x) ", " (-> p2 :position :y) "; " (:weight p2) "]"))
+            (recur (conj poses' (if (> (weight p1) (weight p2)) p1 p2))
+                   (inc count)))))))
 
 (defn init-and-reset [map-atom pose-atom]
   (let [particles (initialize-pf @map-atom num-particles :pose @pose-atom)]
@@ -175,26 +216,65 @@
         by (-> prev-t :translation :y)
         bo (-> prev-t :rotation quat/to-heading)]
     (log/trace "\n PREV: " [bx by bo] "\n"
-                  "CURR: " [ax ay ao])))
+               "CURR: " [ax ay ao])))
+
 
 (defn mcl* [tf-ch laser-ch odom-ch pose-atom map-atom result-ch]
   (try
-    (let [part-init (initialize-pf @map-atom num-particles :pose @pose-atom)]
-      ;; clear it out when we're done
-      (reset! pose-atom nil)
-      (loop [particles part-init prev-transform (geometry-msgs/transform)]
-        (let [particles'(if (nil? @pose-atom) particles (init-and-reset map-atom pose-atom))
-              curr-transform (get-transform tf-ch "odom" "base_footprint")
-              _ (log-transforms curr-transform prev-transform)
-              particles'' (->> particles'
-                               (apply-motion-model [curr-transform prev-transform])
-                               #_(apply-sensor-model (<!! laser-ch) @map-atom)
-                               tournament-selection)
-              pose-stamped (assoc (pose-estimate (:poses particles'')) :header (std-msgs/header :frameId "map"))
-              tf   (update-tf (:pose pose-stamped) tf-ch)]
-          (log/debug "MCL data calculated")
-          (when (>!! result-ch [particles'' pose-stamped tf])
-            (recur particles'' curr-transform)))))
+    (loop [particles (init-and-reset map-atom pose-atom)
+           prev-transform (geometry-msgs/transform)]
+      (let [particles'(if (nil? @pose-atom) particles (init-and-reset map-atom pose-atom))
+            curr-transform (get-transform tf-ch "odom" "base_footprint")
+            _ (log-transforms curr-transform prev-transform)
+            particles'' (->> particles'
+                             (apply-motion-model [curr-transform prev-transform])
+                             (apply-sensor-model (<!! laser-ch) @map-atom)
+                             roulette-selection
+                             #_tournament-selection)
+            pose-stamped (assoc (pose-estimate (:poses particles'')) :header (std-msgs/header :frameId "map"))
+            tf   (update-tf (:pose pose-stamped) tf-ch)]
+        (log/debug "MCL data calculated")
+        (when (>!! result-ch [particles'' pose-stamped tf])
+          (recur particles'' curr-transform))))
+    (catch Exception e
+      (log/error e))))
+
+;; yikes
+(def w-slow (atom 1))
+(def w-fast (atom 1))
+
+(defn augmented-selection [particles w-avg map]
+  (let [poses (:poses particles)
+        total (count poses)
+        slow (swap! w-slow #(+ % (* α-slow (- w-avg %))))
+        fast (swap! w-fast #(+ % (* α-fast (- w-avg %))))]
+    (loop [new-poses [], count 0]
+      (log/debug "slow: " slow ", fast: " fast)
+      (if (= count total) (assoc particles :poses new-poses)
+          (if (> (Math/random) (max 0.0 (- 1.0 (/ fast slow))))
+            (recur (conj new-poses (first (uniform-initialization map 1)))
+                   (inc count))
+            (recur (conj new-poses (roulette-step particles))
+                   (inc count)))))))
+
+(defn amcl* [tf-ch laser-ch odom-ch pose-atom map-atom result-ch]
+  (try
+    (loop [particles (init-and-reset map-atom pose-atom)
+           prev-transform (geometry-msgs/transform)]
+      (let [particles'(if (nil? @pose-atom) particles (init-and-reset map-atom pose-atom))
+            curr-transform (get-transform tf-ch "odom" "base_footprint")
+            particles'' (->> particles'
+                             (apply-motion-model [curr-transform prev-transform])
+                             (apply-sensor-model (<!! laser-ch) @map-atom)
+                             #_roulette-selection
+                             #_tournament-selection)
+            w-avg (median (map :weight (:poses particles'')))
+            particles''' (augmented-selection particles'' w-avg @map-atom)
+            pose-stamped (assoc (pose-estimate (:poses particles''')) :header (std-msgs/header :frameId "map"))
+            tf   (update-tf (:pose pose-stamped) tf-ch)]
+        (log/debug "MCL data calculated")
+        (when (>!! result-ch [particles''' pose-stamped tf])
+          (recur particles''' curr-transform))))
     (catch Exception e
       (log/error e))))
 
@@ -214,7 +294,7 @@ Returns:
 "
   [tf-ch laser-ch odom-ch pose-atom map-atom]
   (let [result-ch (chan)]
-    (go (mcl* tf-ch laser-ch odom-ch pose-atom map-atom result-ch))
+    (go (amcl* tf-ch laser-ch odom-ch pose-atom map-atom result-ch))
     result-ch))
 
 ;;(defn amcl [particles control measurement map])

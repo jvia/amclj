@@ -63,7 +63,7 @@
 
 (defn from-rpy [roll pitch yaw]
   (let [half-yaw  (* 0.5 yaw)
-        half-pich (* 0.5 pitch)
+        half-pitch (* 0.5 pitch)
         half-roll (* 0.5 roll)
         cosYaw (Math/cos half-yaw)
         sinYaw (Math/sin half-yaw)
@@ -75,10 +75,8 @@
      :x (- (* sinRoll cosPitch cosYaw) (* cosRoll sinPitch sinYaw))
      :y (+ (* cosRoll sinPitch cosYaw) (* sinRoll cosPitch sinYaw))
      :z (- (* cosRoll cosPitch sinYaw) (* sinRoll sinPitch cosYaw))
-     :w )))
+     :w (+ (* cosRoll cosPitch cosYaw) (* sinRoll sinPitch sinYaw)))))
 
-;; 00108                          cosRoll * cosPitch * sinYaw - sinRoll * sinPitch * cosYaw, //z
-;; 00109                          cosRoll * cosPitch * cosYaw + sinRoll * sinPitch * sinYaw); //formerly yzx
 
 
 (defn to-heading

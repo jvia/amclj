@@ -6,6 +6,10 @@
             [incanter.stats :as stats]
             [taoensso.timbre :as log]))
 
+(defn- dimensions [map]
+  [(-> map :info :width)
+   (-> map :info :height)])
+
 (defn get-map [map]
   (:data map))
 
@@ -15,7 +19,9 @@
 (defn get-cell
   "Get the value at the location (x,y) in the map."
   [map x y]
-  (incanter.core/sel (:data map) y x))
+  (let [[width height] (dimensions map)]
+    (if (or (> x width) (< x 0) (> y height) (< y 0)) -1
+        (incanter.core/sel (:data map) y x))))
 
 (defn occupied? [map x y]
   (> (get-cell map x y) 0))

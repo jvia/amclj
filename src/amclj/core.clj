@@ -21,7 +21,7 @@
   [x]
   (Thread/sleep 2000) x)
 
-(def ^:dynamic *map* (if (resolve '*map*) *map* (atom nil)))
+(def ^:dynamic *map* (atom nil))
 (def ^:dynamic *pose* (atom nil))
 (def laser-ch (chan (sliding-buffer 1)))
 (def tf-ch (chan (sliding-buffer 1)))
@@ -55,11 +55,13 @@
     (recur)))
 
 #_(reset! *pose*
-        (geometry-msgs/pose-with-covariance-stamped
-         :header (std-msgs/header :frameId "map")
-         :pose (geometry-msgs/pose-with-covariance
-                :pose (geometry-msgs/pose
-                       :position (geometry-msgs/point :x 15 :y 15)))))
+          (geometry-msgs/pose-with-covariance-stamped
+           :header (std-msgs/header :frameId "map")
+           :pose-cov (geometry-msgs/pose-with-covariance
+                  :pose (map/world->map @*map*
+                                        (geometry-msgs/pose
+                                         :position (geometry-msgs/point :x 16.3 :y 15.8)
+                                         :orientation (geometry-msgs/quaternion :z 0.85 :w 0.519))))))
 (defn -main [amcl]
   (info "Starting node")
   (let [;;amcl (make-amcl-node)
@@ -71,7 +73,7 @@
         (publish amcl "/particlecloud" particles)
         (publish amcl "/tf" tf)
         (publish amcl "/pose2" pose)
-        (debug "Published data")
+        (debug "Published: " (count (:poses particles)) " particles")
         (recur)))))
 
 ;; (defn odom-printer []
