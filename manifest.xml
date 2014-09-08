@@ -1,0 +1,18 @@
+<package>
+  <description brief="amclj">
+
+    AMCL in Clojure
+
+  </description>
+  <author>Jeremiah Via</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url></url>
+  <depend package="sensor_msgs"/>
+  <depend package="std_msgs"/>
+  <depend package="actionlib"/>
+  <depend package="nav_msgs"/>
+  <depend package="tf"/>
+</package>
+
+

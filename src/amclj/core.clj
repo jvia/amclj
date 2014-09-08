@@ -20,7 +20,6 @@
   "Artificial delay to allow rosjava to initialize"
   [x]
   (Thread/sleep 2000) x)
-
 (def ^:dynamic *map* (atom nil))
 (def ^:dynamic *pose* (atom nil))
 (def laser-ch (chan (sliding-buffer 1)))

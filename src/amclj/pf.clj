@@ -12,7 +12,7 @@
             [amclj.motion :refer  [sample-motion-model-odometry]]
             [amclj.sensor :refer [likelihood-field-range-finder-model]]))
 
-(def num-particles 50)
+(def num-particles 1500)
 (def α-slow 0.01)
 (def α-fast 0.1)
 
@@ -294,7 +294,7 @@ Returns:
 "
   [tf-ch laser-ch odom-ch pose-atom map-atom]
   (let [result-ch (chan)]
-    (go (amcl* tf-ch laser-ch odom-ch pose-atom map-atom result-ch))
+    (go (mcl* tf-ch laser-ch odom-ch pose-atom map-atom result-ch))
     result-ch))
 
 ;;(defn amcl [particles control measurement map])
